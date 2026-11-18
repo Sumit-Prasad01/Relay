@@ -1,0 +1,4 @@
+openai
+prompt-toolkit
+pyyaml
+rich
