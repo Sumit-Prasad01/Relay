@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 from . import history
 from . import sandbox
@@ -25,20 +26,21 @@ def bash(command: str) -> str:
 
 def read_file(path: str) -> str:
     """Read a file and return its contents."""
-    with open(path) as f:
+    with open(path, encoding="utf-8", errors="replace") as f:
         return history.cap(f.read())
 
 
 def write_file(path: str, content: str) -> str:
     """Create a file, or overwrite it if it already exists."""
-    with open(path, "w") as f:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
         f.write(content)
     return f"Wrote {path}"
 
 
 def str_replace(path, old_str, new_str, allow_multi_edit=False):
     """Swap exact text in a file. old_str must match exactly once."""
-    with open(path) as f:
+    with open(path, encoding="utf-8", errors="replace") as f:
         content = f.read()
 
     count = content.count(old_str)
@@ -51,7 +53,7 @@ def str_replace(path, old_str, new_str, allow_multi_edit=False):
             "or set allow_multi_edit to replace them all."
         )
 
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(content.replace(old_str, new_str))
     return f"Replaced {count} match(es) in {path}"
 

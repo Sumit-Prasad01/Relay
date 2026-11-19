@@ -17,14 +17,22 @@ LABELS = {"M": "modified", "D": "deleted", "A": "added", "??": "new"}
 
 def git(command):
     result = subprocess.run(
-        f"git {command}", shell=True, capture_output=True, text=True
+        f"git {command}",
+        shell=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     return result.stdout
 
 
 def file_hash(path):
     file = Path(path)
-    return hashlib.md5(file.read_bytes()).hexdigest() if file.is_file() else None
+    try:
+        return hashlib.md5(file.read_bytes()).hexdigest() if file.is_file() else None
+    except Exception:
+        return None
 
 
 def git_state():

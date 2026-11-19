@@ -5,7 +5,8 @@ from datetime import datetime
 from pathlib import Path
 
 
-PROJECT = str(Path.cwd().resolve()).replace("/", "-")
+resolved = Path.cwd().resolve()
+PROJECT = str(resolved).replace(":", "").replace("\\", "-").replace("/", "-").strip("-")
 SESSION_DIR = Path.home() / ".agents" / "sessions" / PROJECT
 CURRENT = datetime.now().strftime("%Y%m%d-%H%M%S")
 WRITTEN = 0  # how many messages are already on disk
@@ -20,7 +21,7 @@ def save(messages):
     """Append what is new. Never rewrite what is already on disk."""
     global WRITTEN
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
-    with path_for(CURRENT).open("a") as f:
+    with path_for(CURRENT).open("a", encoding="utf-8") as f:
         for message in messages[WRITTEN:]:
             f.write(json.dumps(message) + "\n")
     WRITTEN = len(messages)
@@ -30,7 +31,8 @@ def save(messages):
 def rewind_to(count):
     """Record a rewind as an entry, so the old messages stay in the file."""
     global WRITTEN
-    with path_for(CURRENT).open("a") as f:
+    SESSION_DIR.mkdir(parents=True, exist_ok=True)
+    with path_for(CURRENT).open("a", encoding="utf-8") as f:
         f.write(json.dumps({"rewind_to": count}) + "\n")
     WRITTEN = count
 
@@ -39,7 +41,8 @@ def rewind_to(count):
 def compacted(messages):
     """Compaction rewrites history, so record the result and start from it."""
     global WRITTEN
-    with path_for(CURRENT).open("a") as f:
+    SESSION_DIR.mkdir(parents=True, exist_ok=True)
+    with path_for(CURRENT).open("a", encoding="utf-8") as f:
         f.write(json.dumps({"compacted": messages}) + "\n")
     WRITTEN = len(messages)
 
@@ -48,7 +51,10 @@ def compacted(messages):
 def load(session_id):
     """Replay the log: messages accumulate, rewinds cut them back."""
     messages = []
-    for line in path_for(session_id).read_text().splitlines():
+    session_file = path_for(session_id)
+    if not session_file.exists():
+        return messages
+    for line in session_file.read_text(encoding="utf-8").splitlines():
         try:
             entry = json.loads(line)
         except json.JSONDecodeError:

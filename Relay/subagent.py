@@ -32,7 +32,7 @@ MAX_TURNS = 12  # a runaway explorer is worse than a missing answer
 # list it is offered, so it cannot call them. The "do not edit files" rule in
 # the prompt below is only asking nicely. To make that one structural too, add
 # write_file and str_replace to this set.
-WITHHELD = {"task", "write_todos", "str_replace", "write"}
+WITHHELD = {"task", "write_todos", "str_replace", "write_file", "write"}
 
 
 SYSTEM_PROMPT = f"""

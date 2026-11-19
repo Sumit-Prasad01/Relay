@@ -38,6 +38,16 @@ def _word_right(event):
     )
 
 
+@bindings.add("c-left")
+def _word_left_ctrl(event):
+    _word_left(event)
+
+
+@bindings.add("c-right")
+def _word_right_ctrl(event):
+    _word_right(event)
+
+
 @bindings.add("escape", "enter")
 def _newline(event):
     """Option-enter starts a new line instead of sending the message."""

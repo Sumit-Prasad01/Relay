@@ -35,7 +35,7 @@ SPILLS = []  # temp files belonging to the current turn
 def spill(text):
     """Park the full output on disk for the rest of this turn."""
     handle = tempfile.NamedTemporaryFile(
-        mode="w", prefix="neuralcode-", suffix=".txt", delete=False
+        mode="w", prefix="relay-", suffix=".txt", delete=False, encoding="utf-8"
     )
     handle.write(text)
     handle.close()
@@ -66,7 +66,10 @@ def cap(text):
 def sweep():
     """Delete this turn's temp files. Their paths die with the tool results."""
     for path in SPILLS:
-        path.unlink(missing_ok=True)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
     SPILLS.clear()
 
 

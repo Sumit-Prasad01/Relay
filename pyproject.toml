@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "relay"
+version = "0.1.0"
+description = "A lightweight coding agent"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openai",
+    "prompt-toolkit",
+    "pyyaml",
+    "rich",
+]
+
+[project.scripts]
+relay = "Relay.agent:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["Relay*"]

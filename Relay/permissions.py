@@ -36,6 +36,9 @@ BASH_RULES = {
     "rg *": "allow",
     "find *": "allow",
     "tree*": "allow",
+    "dir*": "allow",
+    "type *": "allow",
+    "where *": "allow",
     "git status*": "allow",
     "git diff*": "allow",
     "git log*": "allow",
@@ -45,6 +48,8 @@ BASH_RULES = {
     "python -m pytest*": "allow",
     # risky: never, even if the user says yes
     "rm *": "deny",
+    "del *": "deny",
+    "rmdir *": "deny",
     "sudo *": "deny",
     "chmod *": "deny",
     "chown *": "deny",
@@ -109,7 +114,11 @@ def decide(command):
 
 
 def inside_project(path):
-    return PROJECT in Path(path).resolve().parents
+    try:
+        resolved = Path(path).resolve()
+        return resolved == PROJECT or PROJECT in resolved.parents or resolved.is_relative_to(PROJECT)
+    except Exception:
+        return False
 
 
 

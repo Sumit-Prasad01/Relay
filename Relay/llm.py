@@ -1,5 +1,14 @@
 import json
 import os
+import sys
+from pathlib import Path
+
+if __package__ is None or __package__ == "":
+    pkg_dir = Path(__file__).resolve().parent
+    repo_root = pkg_dir.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    __package__ = pkg_dir.name
 
 from openai import OpenAI
 
@@ -10,7 +19,7 @@ from .tools import TOOLS, TOOL_SCHEMAS
 
 client = OpenAI(
     base_url=config.BASE_URL,
-    api_key=config.API_KEY,
+    api_key=config.API_KEY or "missing-key",
 )
 
 

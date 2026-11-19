@@ -5,7 +5,7 @@ import yaml
 
 SKILL_DIRS = [
     Path.cwd() / ".agents" / "skills",
-    Path.home() / "./agents" / "skills",
+    Path.home() / ".agents" / "skills",
 ]
 
 
@@ -13,11 +13,18 @@ def find_skills():
     """Map each skill name to its description and SKILL.md path."""
     skills = {}
     for directory in SKILL_DIRS:
+        if not directory.is_dir():
+            continue
         for path in sorted(directory.glob("*/SKILL.md")):
-            _, frontmatter, _ = path.read_text().split("---", 2)
-            meta = yaml.safe_load(frontmatter)
-            description = " ".join(meta["description"].split())
-            skills[meta["name"]] = {"description": description, "path": path}
+            try:
+                parts = path.read_text(encoding="utf-8").split("---", 2)
+                if len(parts) >= 3:
+                    meta = yaml.safe_load(parts[1])
+                    if isinstance(meta, dict) and "name" in meta and "description" in meta:
+                        description = " ".join(str(meta["description"]).split())
+                        skills[meta["name"]] = {"description": description, "path": path}
+            except Exception:
+                continue
     return skills
 
 
@@ -32,4 +39,7 @@ def read_skill(name: str) -> str:
     """Open a skill and return its full instructions."""
     if name not in SKILLS:
         return f"No skill named '{name}'."
-    return SKILLS[name]["path"].read_text()
+    try:
+        return SKILLS[name]["path"].read_text(encoding="utf-8")
+    except Exception as e:
+        return f"Error reading skill {name}: {e}"

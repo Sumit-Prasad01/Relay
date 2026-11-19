@@ -46,7 +46,7 @@ class UI:
             Rule(Text(" coding agent ", style=f"bold {ACCENT}"), style=MUTED)
         )
         self.console.print(
-            Padding(Text(f"sandbox: {sandbox_name}  ·  opt-enter for a newline  ·  ctrl-d to exit", style=MUTED), (0, 0, 0, 2))
+            Padding(Text(f"sandbox: {sandbox_name}  ·  alt/opt-enter for a newline  ·  ctrl-c/ctrl-d to exit", style=MUTED), (0, 0, 0, 2))
         )
 
     def clear(self):
