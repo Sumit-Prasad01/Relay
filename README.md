@@ -43,16 +43,30 @@ relay doctor
 ### 1. Configure Providers
 Add credentials for any supported provider (secrets are stored securely in your OS keyring):
 ```bash
-# Add Groq
+# 1. Configure OpenRouter
+relay provider add openrouter --model anthropic/claude-3.5-sonnet --api-key <YOUR_KEY>
+
+# 2. Configure Groq
 relay provider add groq --model llama-3.3-70b-versatile --api-key <YOUR_KEY>
 
-# Add Anthropic
+# 3. Configure Anthropic
 relay provider add anthropic --model claude-3-5-sonnet-20241022 --api-key <YOUR_KEY>
 
-# Add OpenAI
+# 4. Configure OpenAI
 relay provider add openai --model gpt-4o --api-key <YOUR_KEY>
 
-# Test provider connectivity
+# 5. Configure Google Gemini
+relay provider add gemini --model gemini-1.5-pro --api-key <YOUR_KEY>
+
+# 6. Configure Local Ollama (No API key needed)
+relay provider add ollama --model qwen2.5-coder:latest
+
+# List all configured providers
+relay provider list
+
+# Test provider connectivity and validate credentials
+relay provider test openrouter
+relay provider test ollama
 relay provider test groq
 ```
 
