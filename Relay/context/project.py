@@ -23,8 +23,8 @@ class ProjectInfo:
 
 
 MANIFEST_DETECT_MAP: Dict[str, Dict[str, Any]] = {
-    "pyproject.toml": {"language": "Python", "test": "pytest", "lint": "ruff check ."},
-    "requirements.txt": {"language": "Python", "test": "pytest", "lint": "ruff check ."},
+    "pyproject.toml": {"language": "Python", "test": "python -m pytest", "lint": "ruff check ."},
+    "requirements.txt": {"language": "Python", "test": "python -m pytest", "lint": "ruff check ."},
     "package.json": {"language": "JavaScript/TypeScript", "test": "npm test", "lint": "npm run lint"},
     "Cargo.toml": {"language": "Rust", "test": "cargo test", "lint": "cargo clippy"},
     "go.mod": {"language": "Go", "test": "go test ./...", "lint": "golangci-lint run"},

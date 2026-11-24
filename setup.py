@@ -13,7 +13,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "relay=Relay.agent:main",
+            "relay=Relay.cli.app:app",
         ],
     },
     python_requires=">=3.10",

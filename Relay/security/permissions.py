@@ -57,8 +57,8 @@ class PermissionManager:
             return PermissionAction.ALLOW, None
 
         # 4. Command execution policy
-        if tool_name == "run_command":
-            cmd = arguments.get("command", "")
+        if tool_name in ("run_command", "run_tests"):
+            cmd = arguments.get("command", "") or "pytest"
             risk, _ = CommandPolicy.classify(cmd)
 
             if risk == CommandRisk.PRIVILEGED:

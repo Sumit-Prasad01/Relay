@@ -13,6 +13,6 @@ def test_project_manifest_and_command_detection(tmp_path):
 
     assert "Python" in info.languages
     assert "pyproject.toml" in info.manifests
-    assert "pytest" in info.test_commands
+    assert any("pytest" in cmd for cmd in info.test_commands)
     assert "ruff check ." in info.lint_commands
     assert "AGENTS.md" in info.instruction_files

@@ -64,10 +64,17 @@ class SandboxRunner:
         import time
         start_time = time.time()
 
+        env = dict(os.environ)
+        venv_bin = str(Path(sys.executable).parent)
+        current_path = env.get("PATH", "")
+        if venv_bin not in current_path:
+            env["PATH"] = f"{venv_bin}{os.pathsep}{current_path}"
+
         try:
             proc = subprocess.Popen(
                 cmd,
                 cwd=self.workspace_root,
+                env=env,
                 shell=use_shell,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

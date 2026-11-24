@@ -11,6 +11,8 @@ from Relay.workflows.state import WorkflowState
 class TestAndRepairWorkflow:
     """Discovers tests, runs them, diagnoses failures, applies bounded fixes, and verifies."""
 
+    __test__ = False
+
     def __init__(
         self,
         provider: LLMProvider,
