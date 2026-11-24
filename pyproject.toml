@@ -37,6 +37,9 @@ include = ["Relay*"]
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.lint]
+ignore = ["N999"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "strict"

@@ -127,3 +127,96 @@ class SessionStore:
                 (change_id, session_id, path, before_hash, after_hash, diff, now_utc),
             )
         return change_id
+
+    def record_tool_call(
+        self,
+        session_id: str,
+        call_id: str,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        status: str = "completed",
+        duration_ms: Optional[int] = None,
+    ) -> str:
+        record_id = str(uuid.uuid4())
+        safe_args = redact_secrets(json.dumps(arguments))
+        now_utc = datetime.now(timezone.utc).isoformat()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO tool_calls (id, session_id, call_id, tool_name, arguments, status, duration_ms, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (record_id, session_id, call_id, tool_name, safe_args, status, duration_ms, now_utc),
+            )
+        return record_id
+
+    def record_tool_result(
+        self,
+        call_id: str,
+        output: str,
+        exit_code: Optional[int] = None,
+        redaction_metadata: Optional[str] = None,
+    ) -> str:
+        record_id = str(uuid.uuid4())
+        safe_output = redact_secrets(output)
+        now_utc = datetime.now(timezone.utc).isoformat()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO tool_results (id, call_id, output, exit_code, redaction_metadata, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (record_id, call_id, safe_output, exit_code, redaction_metadata, now_utc),
+            )
+        return record_id
+
+    def get_tool_calls(self, session_id: str) -> List[Dict[str, Any]]:
+        with self.db.transaction() as conn:
+            rows = conn.execute(
+                "SELECT * FROM tool_calls WHERE session_id = ? ORDER BY created_at ASC",
+                (session_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def delete_session(self, session_id: str) -> bool:
+        """Delete session and cascade delete all associated messages, calls, and events."""
+        with self.db.transaction() as conn:
+            cur = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+            return cur.rowcount > 0
+
+    def export_session(self, session_id: str, export_format: str = "markdown") -> str:
+        """Export session transcript to Markdown or JSON with secrets redacted."""
+        session = self.get_session(session_id)
+        if not session:
+            raise ValueError(f"Session '{session_id}' not found.")
+
+        messages = self.get_messages(session_id)
+        tool_calls = self.get_tool_calls(session_id)
+
+        if export_format.lower() == "json":
+            export_dict = {
+                "session": session,
+                "messages": messages,
+                "tool_calls": tool_calls,
+            }
+            return redact_secrets(json.dumps(export_dict, indent=2))
+
+        # Default: Markdown
+        md_lines = [
+            f"# Session Transcript: {session['title']}",
+            f"- **Session ID:** `{session['id']}`",
+            f"- **Provider / Model:** `{session['provider']}/{session['model']}`",
+            f"- **Workspace:** `{session['workspace']}`",
+            f"- **Created:** `{session['created_at']}`",
+            "",
+            "---",
+            "",
+        ]
+
+        for m in messages:
+            role_header = f"### {m['role'].capitalize()}"
+            md_lines.append(role_header)
+            md_lines.append(m["content"] or "*(no text)*")
+            md_lines.append("")
+
+        return redact_secrets("\n".join(md_lines))

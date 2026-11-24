@@ -6,10 +6,13 @@ from typing import Optional
 import typer
 from Relay import __version__
 from Relay.cli.commands import (
+    ask_command,
     config_app,
     doctor_command,
     init_command,
+    interactive_session,
     models_app,
+    plan_command,
     provider_app,
     sessions_app,
 )
@@ -30,6 +33,8 @@ app.add_typer(sessions_app, name="sessions")
 # Direct commands
 app.command("init", help="Initialize workspace with .relay/ and AGENTS.md")(init_command)
 app.command("doctor", help="Run system diagnostics and verify environment")(doctor_command)
+app.command("ask", help="Execute an autonomous coding task")(ask_command)
+app.command("plan", help="Produce an inspection and execution plan in read-only mode")(plan_command)
 
 
 @app.callback(invoke_without_command=True)
@@ -47,7 +52,11 @@ def main(
         raise typer.Exit()
 
     if ctx.invoked_subcommand is None:
-        print_banner()
-        console.print("Run [bold cyan]relay --help[/bold cyan] to see available commands.")
-        console.print("Run [bold cyan]relay doctor[/bold cyan] to verify system configuration.")
-        console.print("Configure a provider using [bold cyan]relay provider add <name>[/bold cyan].")
+        import sys
+        if sys.stdin and sys.stdin.isatty():
+            interactive_session(workspace=workspace, provider=provider, model=model)
+        else:
+            print_banner()
+            console.print("Run [bold cyan]relay --help[/bold cyan] to see available commands.")
+            console.print("Run [bold cyan]relay doctor[/bold cyan] to verify system configuration.")
+            console.print("Configure a provider using [bold cyan]relay provider add <name>[/bold cyan].")

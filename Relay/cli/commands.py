@@ -285,3 +285,296 @@ def sessions_list(
         table.add_row(s["id"][:8], s["title"], f"{s['provider']}/{s['model']}", s["updated_at"][:19])
 
     console.print(table)
+
+
+@sessions_app.command("show")
+def sessions_show(
+    session_id: str = typer.Argument(..., help="Session ID (full or prefix)"),
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace path"),
+) -> None:
+    """Display session details and message transcript."""
+    app_ctx = create_app_context(workspace_root=workspace)
+    # Match by ID or prefix
+    target_id = session_id
+    sessions = app_ctx.session_store.list_sessions(workspace=app_ctx.workspace_root)
+    matching = [s for s in sessions if s["id"].startswith(session_id)]
+    if matching:
+        target_id = matching[0]["id"]
+
+    session = app_ctx.session_store.get_session(target_id)
+    if not session:
+        console.print(f"[red]Error: Session '{session_id}' not found.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold cyan]Session:[/bold cyan] {session['title']}")
+    console.print(f"[dim]ID: {session['id']} | Provider: {session['provider']}/{session['model']}[/dim]")
+    console.print(f"[dim]Created: {session['created_at']} | Updated: {session['updated_at']}[/dim]\n")
+
+    messages = app_ctx.session_store.get_messages(target_id)
+    for m in messages:
+        role_color = {"user": "bold yellow", "assistant": "bold green", "system": "dim cyan", "tool": "dim magenta"}.get(m["role"], "bold")
+        console.print(f"[{role_color}][{m['role'].upper()}][/{role_color}]")
+        console.print(m["content"] or "*(no content)*")
+        console.print()
+
+
+@sessions_app.command("export")
+def sessions_export(
+    session_id: str = typer.Argument(..., help="Session ID (full or prefix)"),
+    format: str = typer.Option("markdown", "--format", "-f", help="Export format: markdown or json"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="File to save exported transcript to"),
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace path"),
+) -> None:
+    """Export session transcript with secrets redacted."""
+    app_ctx = create_app_context(workspace_root=workspace)
+    sessions = app_ctx.session_store.list_sessions(workspace=app_ctx.workspace_root)
+    matching = [s for s in sessions if s["id"].startswith(session_id)]
+    target_id = matching[0]["id"] if matching else session_id
+
+    try:
+        exported = app_ctx.session_store.export_session(target_id, export_format=format)
+    except Exception as e:
+        console.print(f"[red]Export failed: {e}[/red]")
+        raise typer.Exit(1)
+
+    if output:
+        output.write_text(exported, encoding="utf-8")
+        console.print(f"[green]Transcript saved to {output.resolve()}[/green]")
+    else:
+        console.print(exported)
+
+
+@sessions_app.command("delete")
+def sessions_delete(
+    session_id: str = typer.Argument(..., help="Session ID (full or prefix)"),
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace path"),
+) -> None:
+    """Delete a conversation session."""
+    app_ctx = create_app_context(workspace_root=workspace)
+    sessions = app_ctx.session_store.list_sessions(workspace=app_ctx.workspace_root)
+    matching = [s for s in sessions if s["id"].startswith(session_id)]
+    target_id = matching[0]["id"] if matching else session_id
+
+    if app_ctx.session_store.delete_session(target_id):
+        console.print(f"[green]Deleted session '{target_id}'.[/green]")
+    else:
+        console.print(f"[red]Error: Session '{session_id}' not found.[/red]")
+        raise typer.Exit(1)
+
+
+@sessions_app.command("resume")
+def sessions_resume(
+    session_id: str = typer.Argument(..., help="Session ID (full or prefix)"),
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace path"),
+) -> None:
+    """Resume an existing session in interactive mode."""
+    app_ctx = create_app_context(workspace_root=workspace)
+    sessions = app_ctx.session_store.list_sessions(workspace=app_ctx.workspace_root)
+    matching = [s for s in sessions if s["id"].startswith(session_id)]
+    target_id = matching[0]["id"] if matching else session_id
+
+    interactive_session(workspace=workspace, session_id=target_id)
+
+
+def interactive_session(
+    workspace: Optional[Path] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> None:
+    """Run interactive terminal session with in-session slash commands (Section 13.2)."""
+    from prompt_toolkit import PromptSession
+    from Relay.agent.runtime import AgentRuntime
+    from Relay.security.permissions import PermissionManager
+
+    app_ctx = create_app_context(workspace_root=workspace, provider=provider, model=model)
+    perm_manager = PermissionManager(mode=app_ctx.config.permission_mode, workspace_root=app_ctx.workspace_root)
+    runtime = AgentRuntime(app_context=app_ctx, permission_manager=perm_manager)
+
+    if session_id:
+        try:
+            state = runtime.resume_session(session_id)
+            console.print(f"[green]Resumed session {state.session_id[:8]} ({len(state.messages)} prior messages)[/green]")
+        except Exception as e:
+            console.print(f"[red]Could not resume session ({e}). Creating new session.[/red]")
+            state = runtime.create_session(provider=provider, model=model)
+    else:
+        state = runtime.create_session(provider=provider, model=model)
+
+    print_banner()
+    console.print(f"Connected to [bold cyan]{state.provider_name}/{state.model_name}[/bold cyan] | Mode: [bold yellow]{perm_manager.mode}[/bold yellow]")
+    console.print("Type your coding request, or [bold]/help[/bold] for commands. Ctrl+C or [bold]/quit[/bold] to exit.\n")
+
+    prompt_session = PromptSession()
+
+    while True:
+        try:
+            user_input = prompt_session.prompt("relay > ").strip()
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[dim]Goodbye![/dim]")
+            break
+
+        if not user_input:
+            continue
+
+        # Slash command handling (Section 13.2)
+        if user_input.startswith("/"):
+            parts = user_input.split()
+            cmd = parts[0].lower()
+
+            if cmd in ("/quit", "/exit"):
+                console.print("[dim]Goodbye![/dim]")
+                break
+            elif cmd == "/help":
+                console.print(
+                    "[bold]Available Interactive Commands:[/bold]\n"
+                    "  /help              Show this help reference\n"
+                    "  /diff              Show working tree git diff\n"
+                    "  /status            Show active provider, model, permissions, and stats\n"
+                    "  /permissions [m]   Inspect or switch permission mode (plan, ask, auto-edit, full-auto)\n"
+                    "  /sessions          List recent workspace sessions\n"
+                    "  /export [format]   Export current session transcript (markdown or json)\n"
+                    "  /clear             Clear the terminal screen\n"
+                    "  /quit              Exit interactive session\n"
+                )
+                continue
+            elif cmd == "/diff":
+                diff = runtime.get_diff()
+                if diff:
+                    from rich.panel import Panel
+                    from rich.syntax import Syntax
+                    console.print(Panel(Syntax(diff, "diff", theme="monokai", line_numbers=True), title="Git Diff"))
+                else:
+                    console.print("[dim]No working tree modifications.[/dim]")
+                continue
+            elif cmd == "/status":
+                console.print(
+                    f"Session: {state.session_id}\n"
+                    f"Provider: {state.provider_name}\n"
+                    f"Model: {state.model_name}\n"
+                    f"Permission Mode: {perm_manager.mode}\n"
+                    f"Turn count: {state.turn_count}\n"
+                    f"Total tokens used: {state.total_tokens_used}\n"
+                    f"Files modified: {', '.join(state.changed_files) if state.changed_files else 'None'}"
+                )
+                continue
+            elif cmd == "/permissions":
+                if len(parts) > 1 and parts[1] in ("plan", "ask", "auto-edit", "full-auto"):
+                    perm_manager.mode = parts[1]
+                    console.print(f"[green]Permission mode switched to '{parts[1]}'.[/green]")
+                else:
+                    console.print(f"Current mode: [bold yellow]{perm_manager.mode}[/bold yellow]. Use '/permissions [plan|ask|auto-edit|full-auto]' to change.")
+                continue
+            elif cmd == "/sessions":
+                sessions_list(workspace=app_ctx.workspace_root)
+                continue
+            elif cmd == "/export":
+                fmt = parts[1] if len(parts) > 1 else "markdown"
+                console.print(app_ctx.session_store.export_session(state.session_id, export_format=fmt))
+                continue
+            elif cmd == "/clear":
+                console.clear()
+                continue
+            else:
+                console.print(f"[yellow]Unknown slash command '{cmd}'. Type /help for available commands.[/yellow]")
+                continue
+
+        # Normal prompt turn
+        try:
+            asyncio.run(_run_turn_stream(runtime, state, user_input))
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Turn cancelled by user.[/yellow]")
+            runtime.cancel(state)
+
+
+async def _run_turn_stream(runtime, state, prompt: str) -> None:
+    """Stream agent execution turn events to terminal."""
+    from rich.panel import Panel
+    from rich.syntax import Syntax
+
+    console.print(f"\n[bold cyan]Relay Agent[/bold cyan] ({state.provider_name}/{state.model_name})")
+    console.print(f"[dim]Workspace: {state.workspace_root}[/dim]\n")
+
+    current_text_line = []
+    async for event in runtime.run_turn(state, prompt):
+        if event.event_type == "text_delta" and event.text_delta:
+            console.print(event.text_delta, end="", highlight=False)
+            current_text_line.append(event.text_delta)
+        elif event.event_type == "tool_call_requested" and event.tool_call:
+            if current_text_line:
+                console.print()
+                current_text_line = []
+            console.print(f"\n[bold blue]🛠️  Tool:[/bold blue] [cyan]{event.tool_call.name}[/cyan] [dim]{event.tool_call.arguments}[/dim]")
+        elif event.event_type == "tool_call_completed" and event.tool_result:
+            duration = f"{event.tool_result.duration_ms}ms" if event.tool_result.duration_ms else ""
+            console.print(f"[green]✓ Completed {duration}[/green]")
+            if event.tool_result.content and len(event.tool_result.content) < 300:
+                console.print(f"[dim]{event.tool_result.content.strip()}[/dim]")
+        elif event.event_type == "tool_call_failed" and event.tool_result:
+            console.print(f"[bold red]✗ Failed:[/bold red] {event.tool_result.content.strip()}")
+        elif event.event_type == "file_changed" and event.file_path:
+            console.print(f"[bold yellow]📝 Modified file:[/bold yellow] [bold]{event.file_path}[/bold]")
+        elif event.event_type == "error":
+            console.print(f"\n[bold red]Error:[/bold red] {event.error}")
+        elif event.event_type == "stop_condition_met":
+            console.print(f"\n[dim magenta]⏹️  {event.message}[/dim magenta]")
+
+    console.print("\n")
+    summary = runtime.summarize_changes(state)
+    if summary["changed_files"]:
+        console.print("[bold green]Files Changed:[/bold green]")
+        for f in summary["changed_files"]:
+            console.print(f" - [bold]{f}[/bold]")
+        if summary.get("diff"):
+            console.print(Panel(Syntax(summary["diff"], "diff", theme="monokai", line_numbers=True), title="Diff"))
+
+    console.print(f"[dim]Tokens used: {summary['tokens']['total']} (prompt: {summary['tokens']['prompt']}, completion: {summary['tokens']['completion']})[/dim]")
+
+
+def ask_command(
+    prompt: str = typer.Argument(..., help="Prompt or task instructions for Relay agent"),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="Provider override"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model override"),
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace path"),
+    permission_mode: Optional[str] = typer.Option(None, "--mode", help="Permission mode (plan, ask, auto-edit, full-auto)"),
+) -> None:
+    """Execute a task autonomously using the agent runtime."""
+    from Relay.agent.runtime import AgentRuntime
+    from Relay.security.permissions import PermissionManager
+
+    app_ctx = create_app_context(
+        workspace_root=workspace,
+        provider=provider,
+        model=model,
+    )
+    p_mode = permission_mode or app_ctx.config.permission_mode
+    perm_manager = PermissionManager(mode=p_mode, workspace_root=app_ctx.workspace_root)
+    runtime = AgentRuntime(app_context=app_ctx, permission_manager=perm_manager)
+
+    state = runtime.create_session(
+        title=prompt[:50],
+        provider=provider or app_ctx.config.default_provider,
+        model=model,
+    )
+
+    try:
+        asyncio.run(_run_turn_stream(runtime, state, prompt))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Task cancelled by user (Ctrl+C).[/yellow]")
+        runtime.cancel(state)
+
+
+def plan_command(
+    prompt: str = typer.Argument(..., help="Task to analyze and plan without executing mutations"),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="Provider override"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model override"),
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace path"),
+) -> None:
+    """Analyze the repository and create an execution plan in read-only mode."""
+    ask_command(
+        prompt=f"Please inspect the codebase and create a detailed implementation plan for: {prompt}. Do not modify any files.",
+        provider=provider,
+        model=model,
+        workspace=workspace,
+        permission_mode="plan",
+    )

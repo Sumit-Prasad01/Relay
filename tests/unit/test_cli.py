@@ -51,3 +51,15 @@ def test_cli_provider_add_with_options(tmp_path):
     )
     assert result.exit_code == 0
     assert "Provider 'groq' configured with model 'llama-3.1-8b-instant'" in result.output
+
+
+def test_cli_ask_help():
+    result = runner.invoke(app, ["ask", "--help"])
+    assert result.exit_code == 0
+    assert "Execute an autonomous coding task" in result.output
+
+
+def test_cli_plan_help():
+    result = runner.invoke(app, ["plan", "--help"])
+    assert result.exit_code == 0
+    assert "Produce an inspection and execution plan" in result.output
