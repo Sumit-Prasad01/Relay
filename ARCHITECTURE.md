@@ -61,15 +61,15 @@ The codebase is organized into dedicated functional modules under `Relay/`:
 | Package / Module | Responsibility | Key Classes & Functions |
 | :--- | :--- | :--- |
 | **`Relay.agent`** | Custom autonomous agent runtime, streaming turn loop, message conversions, safety stops, and retry policies. | `AgentRuntime`, `AgentLoop`, `AgentState`, `StopConditions`, `RetryPolicy`, `ErrorClassifier` |
-| **`Relay.cli`** | Developer CLI commands, interactive REPL, Prompt Toolkit terminal handling, rich output rendering. | `app`, `commands.py`, `display.py`, `prompts.py` |
-| **`Relay.config`** | Configuration schemas, YAML loading, OS keyring secret storage, environment variable overrides. | `ConfigLoader`, `AppConfig`, `SecretManager` |
-| **`Relay.context`** | Project discovery, AST parsing, BM25 symbol ranking, token budgeting, and transcript compaction. | `ProjectDiscovery`, `ContextBuilder`, `Compactor`, `IgnoreEngine`, `CodeSearch` |
-| **`Relay.integrations`** | Extensibility mechanisms: custom markdown skill discovery and lifecycle hook event dispatchers. | `SkillManager`, `HookDispatcher`, `LifecycleEvent` |
-| **`Relay.providers`** | Provider-agnostic adapter interfaces, message normalization, capability registries, and vendor implementations. | `BaseProvider`, `LLMProvider`, `CapabilityRegistry`, `ProviderRegistry`, `create_provider` |
-| **`Relay.security`** | 4-tier permission modes, shell command risk classification, sandbox execution, and filesystem snapshots. | `PermissionManager`, `CommandPolicy`, `SandboxRunner`, `FileSystemSnapshot`, `ApprovalRecord` |
-| **`Relay.storage`** | Local SQLite persistence, WAL configuration, zero-dependency schema migration runner, and session stores. | `Database`, `SessionStore`, `EventStore`, `001_initial_schema.sql` |
+| **`Relay.cli`** | Developer CLI commands, interactive onboarding wizard (provider dropdown, masked API key box, model box), live streaming Markdown & spinner animations, and slash commands (`/model`, `/diff`, etc.). | `app`, `commands.py`, `display.py`, `prompts.py`, `pulse_status` |
+| **`Relay.config`** | Configuration schemas, TOML loading, OS keyring secret storage, environment variable overrides. | `load_config`, `RootConfig`, `SecretManager` |
+| **`Relay.context`** | Project discovery, AST parsing, BM25 symbol ranking, token budgeting, and transcript compaction. | `ProjectDiscovery`, `ContextBuilder`, `Compactor`, `IgnoreRules`, `CodeSearch` |
+| **`Relay.integrations`** | Extensibility mechanisms: custom markdown skill discovery and lifecycle hook event dispatchers. | `SkillLoader`, `HookDispatcher`, `LifecycleEvent` |
+| **`Relay.providers`** | Provider-agnostic adapter interfaces, message normalization, clean async teardown (`aclose`), capability registries, and vendor implementations. | `BaseProvider`, `LLMProvider`, `OpenAICompatibleProvider`, `CapabilityRegistry`, `ProviderRegistry`, `create_provider` |
+| **`Relay.security`** | 4-tier permission modes, shell command risk classification, sandbox execution, approval prompts, and filesystem snapshots. | `PermissionManager`, `CommandPolicy`, `SandboxRunner`, `SnapshotManager`, `ApprovalHandler` |
+| **`Relay.storage`** | Local SQLite persistence, WAL configuration, zero-dependency schema migration runner, and session/event stores. | `Database`, `SessionStore`, `EventStore`, `001_initial_schema.sql` |
 | **`Relay.tools`** | Built-in file, terminal, git, search, diagnostics tools, tool registry, and MCP client integration. | `ToolRegistry`, `BaseTool`, `FileSystemTools`, `TerminalTool`, `MCPClient`, `PatchTool` |
-| **`Relay.utils`** | Cross-platform utilities, unified exception hierarchy, structured logging, and path sanitization. | `RelayError`, `get_platform_name`, `sanitize_path`, `setup_logging` |
+| **`Relay.utils`** | Cross-platform utilities, unified exception hierarchy, secret-redacting logging (`WARNING` default for HTTP transports), and path sanitization. | `RelayError`, `get_platform_name`, `configure_logging`, `redact_secrets` |
 | **`Relay.workflows`** | LangGraph orchestration graphs, specialist subagents (`Analyst`, `Implementer`, etc.), and checkpointing. | `GraphFactory`, `WorkflowState`, `WorkflowCheckpointer`, `SubagentFactory` |
 
 ---
@@ -80,14 +80,14 @@ Relay enforces strict normalization: no provider-specific SDK types, headers, or
 
 ### 3.1 Supported Providers Matrix
 
-| Provider | Adapter Class | Primary Models | Capabilities Supported | Authentication |
+| Provider | Adapter Class | Transport / Base | Capabilities Supported | Authentication |
 | :--- | :--- | :--- | :--- | :--- |
-| **OpenRouter** | `OpenRouterProvider` | `anthropic/claude-3.5-sonnet`, `deepseek/deepseek-chat` | Streaming, Tool Calling, Structured Outputs | Bearer Token (`OPENROUTER_API_KEY`) |
-| **Groq** | `GroqProvider` | `llama-3.3-70b-versatile`, `mixtral-8x7b-32768` | Ultra-fast Streaming, Parallel Tool Calling | Bearer Token (`GROQ_API_KEY`) |
-| **Anthropic** | `AnthropicProvider` | `claude-3-5-sonnet-20241022`, `claude-3-5-haiku` | Streaming, Tool Calling, System Prompt, Vision | Header `x-api-key` (`ANTHROPIC_API_KEY`) |
-| **OpenAI** | `OpenAIProvider` | `gpt-4o`, `gpt-4o-mini`, `o1`, `o3-mini` | Streaming, Parallel Tool Calls, Strict JSON | Bearer Token (`OPENAI_API_KEY`) |
-| **Google Gemini** | `GeminiProvider` | `gemini-1.5-pro`, `gemini-1.5-flash`, `gemini-2.0-flash` | Streaming, Tool Calling, Large Context (1M+) | Query/Header (`GEMINI_API_KEY`) |
-| **Ollama** | `OllamaProvider` | `qwen2.5-coder:latest`, `deepseek-coder-v2` | Local Streaming, Tool Calling, Offline Execution | None (Local `http://localhost:11434`) |
+| **OpenRouter** | `OpenRouterProvider` | `OpenAICompatibleProvider` | Streaming, Tool Calling, Multi-provider Gateway | Bearer Token (`OPENROUTER_API_KEY`) |
+| **Groq** | `GroqProvider` | `OpenAICompatibleProvider` | Ultra-fast Streaming, Parallel Tool Calling | Bearer Token (`GROQ_API_KEY`) |
+| **Anthropic** | `AnthropicProvider` | Native `httpx` Messages API | Streaming, Tool Calling, System Prompt, Vision | Header `x-api-key` (`ANTHROPIC_API_KEY`) |
+| **OpenAI** | `OpenAIProvider` | `OpenAICompatibleProvider` | Streaming, Parallel Tool Calls, Strict JSON | Bearer Token (`OPENAI_API_KEY`) |
+| **Google Gemini** | `GeminiProvider` | `OpenAICompatibleProvider` (OpenAI-compat endpoint) | Streaming, Tool Calling, Large Context | Bearer / Key (`GEMINI_API_KEY`) |
+| **Ollama** | `OllamaProvider` | Native `httpx` Local API | Local Streaming, Tool Calling, Offline Execution | None (Local `http://localhost:11434`) |
 
 ### 3.2 Universal Contract Data Model
 
@@ -138,25 +138,46 @@ classDiagram
     ModelResponse "1" *-- "many" ToolCall
 ```
 
-### 3.3 Provider Request/Response Flow
+### 3.3 Provider Request/Response & Clean Teardown Flow
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Runtime as Agent Runtime
-    participant Adapter as Provider Adapter (e.g. AnthropicProvider)
+    participant Adapter as Provider Adapter (e.g. GeminiProvider)
     participant API as External Provider API (HTTP/SSE)
 
-    Runtime->>Adapter: generate_stream(ModelRequest)
-    Adapter->>Adapter: _convert_request(ModelRequest -> Vendor JSON Payload)
-    Adapter->>API: POST /messages (stream=true)
+    Runtime->>Adapter: stream(ModelRequest)
+    Adapter->>Adapter: _convert_messages(ModelRequest -> Vendor JSON Payload)
+    Adapter->>API: POST /chat/completions (stream=true)
     loop SSE Stream Processing
         API-->>Adapter: SSE Chunk (raw JSON)
         Adapter->>Adapter: Parse Vendor Delta -> ModelEvent(text_delta / tool_call_delta)
         Adapter-->>Runtime: Yield ModelEvent
     end
     API-->>Adapter: Final Frame (usage & finish_reason)
-    Adapter-->>Runtime: Yield ModelEvent(event_type="turn_complete", usage=UsageInfo)
+    Adapter-->>Runtime: Yield ModelEvent(event_type="completion", usage=UsageInfo)
+    Runtime->>Adapter: aclose() (inside finally before event loop closes)
+    Adapter->>Adapter: Close HTTP connection pool & settle Windows Proactor transports
+```
+
+### 3.4 Interactive Terminal UI & Session Lifecycle (`Relay/cli`)
+
+Running `relay` in an interactive TTY executes an explicit onboarding and mid-session switching workflow built on `prompt_toolkit` and `Rich`:
+
+```mermaid
+flowchart LR
+    Start([relay CLI launch]) --> Banner[Animated Dark Banner<br/>Rich.Live Reveal]
+    Banner --> Flags{--provider supplied<br/>or resume?}
+    Flags -- No --> Dropdown[Provider Dropdown<br/>openrouter / groq / anthropic / openai / gemini / ollama]
+    Dropdown --> KeyBox[Masked API Key Box<br/>Keyring Lookup & Save]
+    KeyBox --> ModelBox[Model Name Input Box<br/>Empty Default, No Demo Names]
+    Flags -- Yes --> Init
+    ModelBox --> Init[pulse_status Spinner &<br/>Session Card]
+    Init --> REPL[Dark REPL Loop<br/>relay > + Bottom Toolbar]
+    REPL -->|/model| Dropdown
+    REPL -->|User Prompt| Stream[Live Markdown Renderer +<br/>Thinking/Tool Spinners]
+    Stream --> REPL
 ```
 
 ---
@@ -532,13 +553,15 @@ sequenceDiagram
     Context-->>Runtime: Assembled ModelRequest with System & Manifests
     
     loop Turn Resolution Cycle
-        Runtime->>Provider: generate_stream(ModelRequest)
+        Runtime->>Provider: stream(ModelRequest)
         Provider-->>Runtime: Stream ModelEvents (Text & Tool Calls)
-        alt Emitted Tool Call (e.g. edit_file)
-            Runtime->>Perm: check_permission(tool_call, mode="ask")
+        alt Emitted Text Delta
+            Runtime-->>CLI: Buffer & render via Rich Live Markdown
+        else Emitted Tool Call (e.g. edit_file)
+            Runtime->>Perm: evaluate_tool(tool_call, mode="ask")
             alt Requires User Approval
                 Perm->>CLI: Request confirmation prompt
-                CLI->>User: "Approve edit_file on calculator.py? [y/N]"
+                CLI->>User: "Proceed with this action? [y/N]"
                 User-->>CLI: "y"
                 CLI-->>Perm: Decision: Approved
             end
@@ -548,13 +571,14 @@ sequenceDiagram
             Runtime->>DB: record_tool_call & record_file_change
             Runtime->>Runtime: Append ToolResult to message history
         else Finished (finish_reason="stop")
-            Runtime->>CLI: Stream final text summary
+            Runtime->>CLI: Flush final rendered Markdown & summary
         end
     end
 
-    Runtime->>DB: update_session_status("completed")
+    Runtime->>Provider: aclose() (graceful HTTP client shutdown)
+    Runtime->>DB: update_session / persist event log
     Runtime-->>CLI: Task completed (unified diff available)
-    CLI-->>User: Display summary banner and modified files
+    CLI-->>User: Display modified files and token usage bar
 ```
 
 ---

@@ -155,3 +155,7 @@ class BaseProvider(ABC):
     @abstractmethod
     def get_capabilities(self, model: str) -> ModelCapabilities:
         pass
+
+    async def aclose(self) -> None:
+        """Release any open network clients or connection pools."""
+        return None

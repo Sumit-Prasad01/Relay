@@ -2,7 +2,7 @@
 
 import subprocess
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, Optional
 
 from Relay.agent.events import AgentEvent
 from Relay.agent.loop import AgentLoop
@@ -128,8 +128,12 @@ class AgentRuntime:
             base_system_prompt=self.base_system_prompt,
         )
 
-        async for event in loop.run_turn(state=state, user_input=user_input):
-            yield event
+        try:
+            async for event in loop.run_turn(state=state, user_input=user_input):
+                yield event
+        finally:
+            if hasattr(provider, "aclose"):
+                await provider.aclose()
 
     def cancel(self, state: AgentState) -> None:
         """Signal cancellation for an active state."""

@@ -1,6 +1,6 @@
 """OpenAI-compatible base adapter used by Groq, OpenRouter, OpenAI, and Gemini."""
 
-import json
+import asyncio
 from typing import Any, AsyncIterator, Dict, List, Optional
 from openai import AsyncOpenAI
 import httpx
@@ -46,6 +46,18 @@ class OpenAICompatibleProvider(BaseProvider):
                 timeout=httpx.Timeout(self.timeout, connect=10.0),
             )
         return self._client
+
+    async def aclose(self) -> None:
+        """Close the AsyncOpenAI httpx pool while the active event loop is still running."""
+        if self._client is not None:
+            client = self._client
+            self._client = None
+            try:
+                await client.close()
+                # Allow Windows ProactorEventLoop TLS transport callbacks to finish before loop teardown
+                await asyncio.sleep(0.05)
+            except Exception:
+                pass
 
     def _convert_messages(self, messages: List[ModelMessage]) -> List[Dict[str, Any]]:
         payload = []
@@ -166,46 +178,50 @@ class OpenAICompatibleProvider(BaseProvider):
         accumulated_tools: Dict[int, Dict[str, str]] = {}
         finish_reason = "stop"
 
-        async for chunk in stream:
-            # Check for usage in chunk
-            if getattr(chunk, "usage", None):
-                yield ModelEvent(
-                    event_type="usage",
-                    usage=UsageInfo(
-                        prompt_tokens=chunk.usage.prompt_tokens,
-                        completion_tokens=chunk.usage.completion_tokens,
-                        total_tokens=chunk.usage.total_tokens,
-                    ),
-                )
+        try:
+            async for chunk in stream:
+                # Check for usage in chunk
+                if getattr(chunk, "usage", None):
+                    yield ModelEvent(
+                        event_type="usage",
+                        usage=UsageInfo(
+                            prompt_tokens=chunk.usage.prompt_tokens,
+                            completion_tokens=chunk.usage.completion_tokens,
+                            total_tokens=chunk.usage.total_tokens,
+                        ),
+                    )
 
-            if not chunk.choices:
-                continue
+                if not chunk.choices:
+                    continue
 
-            choice = chunk.choices[0]
-            if choice.finish_reason:
-                finish_reason = choice.finish_reason
+                choice = chunk.choices[0]
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
 
-            delta = choice.delta
-            if delta.content:
-                yield ModelEvent(event_type="text_delta", text_delta=delta.content)
+                delta = choice.delta
+                if delta.content:
+                    yield ModelEvent(event_type="text_delta", text_delta=delta.content)
 
-            if delta.tool_calls:
-                for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    if idx not in accumulated_tools:
-                        accumulated_tools[idx] = {
-                            "id": tc_delta.id or "",
-                            "name": tc_delta.function.name or "" if tc_delta.function else "",
-                            "arguments": "",
-                        }
-                    else:
-                        if tc_delta.id:
-                            accumulated_tools[idx]["id"] += tc_delta.id
-                        if tc_delta.function and tc_delta.function.name:
-                            accumulated_tools[idx]["name"] += tc_delta.function.name
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in accumulated_tools:
+                            accumulated_tools[idx] = {
+                                "id": tc_delta.id or "",
+                                "name": tc_delta.function.name or "" if tc_delta.function else "",
+                                "arguments": "",
+                            }
+                        else:
+                            if tc_delta.id:
+                                accumulated_tools[idx]["id"] += tc_delta.id
+                            if tc_delta.function and tc_delta.function.name:
+                                accumulated_tools[idx]["name"] += tc_delta.function.name
 
-                    if tc_delta.function and tc_delta.function.arguments:
-                        accumulated_tools[idx]["arguments"] += tc_delta.function.arguments
+                        if tc_delta.function and tc_delta.function.arguments:
+                            accumulated_tools[idx]["arguments"] += tc_delta.function.arguments
+        finally:
+            if hasattr(stream, "close"):
+                await stream.close()
 
         # Emit assembled tool calls
         for idx in sorted(accumulated_tools.keys()):

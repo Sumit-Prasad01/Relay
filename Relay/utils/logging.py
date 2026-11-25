@@ -63,9 +63,20 @@ class RedactingFormatter(logging.Formatter):
         return f"{prefix} {safe_msg}"
 
 
+NOISY_LOGGERS = (
+    "httpx",
+    "httpx2",
+    "httpcore",
+    "httpcore2",
+    "openai",
+    "urllib3",
+    "asyncio",
+)
+
+
 def configure_logging(debug: bool = False, json_logs: bool = False) -> None:
-    """Configure root logger with redacting formatter."""
-    level = logging.DEBUG if debug else logging.INFO
+    """Configure root logger with redacting formatter and quiet HTTP transport logs unless debug=True."""
+    level = logging.DEBUG if debug else logging.WARNING
     root = logging.getLogger()
     root.setLevel(level)
 
@@ -75,6 +86,10 @@ def configure_logging(debug: bool = False, json_logs: bool = False) -> None:
     handler.setLevel(level)
     handler.setFormatter(RedactingFormatter(json_format=json_logs))
     root.addHandler(handler)
+
+    third_party_level = logging.DEBUG if debug else logging.WARNING
+    for logger_name in NOISY_LOGGERS:
+        logging.getLogger(logger_name).setLevel(third_party_level)
 
 
 def get_logger(name: str) -> logging.Logger:

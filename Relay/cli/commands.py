@@ -8,8 +8,27 @@ from typing import Optional
 
 import typer
 from Relay.app import create_app_context
-from Relay.cli.display import console, print_banner, print_doctor_report
-from Relay.cli.prompts import prompt_credentials_interactive
+from Relay.cli.display import (
+    ACCENT,
+    ACCENT_ALT,
+    BORDER,
+    DIM,
+    ERROR,
+    MUTED,
+    SUCCESS,
+    WARNING,
+    console,
+    print_banner,
+    print_doctor_report,
+    print_session_card,
+    pulse_status,
+)
+from Relay.cli.prompts import (
+    RELAY_PROMPT_STYLE,
+    prompt_api_key,
+    prompt_credentials_interactive,
+    save_provider_credential,
+)
 from Relay.config.loader import load_config
 from Relay.config.secrets import SecretManager
 from Relay.providers.factory import create_provider
@@ -119,16 +138,24 @@ def provider_list(
 ) -> None:
     """List configured providers and their status."""
     cfg = load_config(workspace_root=workspace)
+    from rich import box
     from rich.table import Table
-    table = Table(title="Configured Providers")
-    table.add_column("Provider", style="bold")
-    table.add_column("Enabled")
-    table.add_column("Default Model")
-    table.add_column("Base URL")
+
+    table = Table(
+        title="Configured Providers",
+        title_style="bold #f8fafc",
+        box=box.ROUNDED,
+        border_style=BORDER,
+        header_style=f"bold {ACCENT}",
+    )
+    table.add_column("Provider", style="bold #f8fafc")
+    table.add_column("Enabled", justify="center")
+    table.add_column("Default Model", style=MUTED)
+    table.add_column("Base URL", style=DIM)
 
     for name, p in cfg.providers.items():
-        is_default = " (default)" if name == cfg.default_provider else ""
-        enabled_str = "[green]Yes[/green]" if p.enabled else "[dim]No[/dim]"
+        is_default = f" [{ACCENT}](default)[/{ACCENT}]" if name == cfg.default_provider else ""
+        enabled_str = f"[{SUCCESS}]● Yes[/{SUCCESS}]" if p.enabled else f"[{DIM}]○ No[/{DIM}]"
         table.add_row(f"{name}{is_default}", enabled_str, p.model or "(none)", p.base_url or "(default)")
 
     console.print(table)
@@ -174,7 +201,14 @@ def provider_test(
     provider = create_provider(provider_name, cfg.providers[provider_name])
     console.print(f"Testing connectivity to [bold]{provider_name}[/bold]...")
 
-    health = asyncio.run(provider.validate())
+    async def _run_validate():
+        try:
+            return await provider.validate()
+        finally:
+            if hasattr(provider, "aclose"):
+                await provider.aclose()
+
+    health = asyncio.run(_run_validate())
     if health.healthy:
         console.print(f"[bold green]PASS:[/bold green] {health.message}")
         if health.models:
@@ -191,36 +225,58 @@ def models_list(
 ) -> None:
     """List models configured across providers."""
     cfg = load_config(workspace_root=workspace)
+    from rich import box
     from rich.table import Table
 
     if provider:
         p_name = provider.strip().lower()
         if p_name not in cfg.providers:
-            console.print(f"[red]Unknown provider: {p_name}[/red]")
+            console.print(f"[{ERROR}]Unknown provider: {p_name}[/{ERROR}]")
             raise typer.Exit(1)
         p_instance = create_provider(p_name, cfg.providers[p_name])
-        models = asyncio.run(p_instance.list_models())
 
-        table = Table(title=f"Models for {p_name}")
-        table.add_column("Model ID", style="bold")
-        table.add_column("Tool Calling")
-        table.add_column("Context Window")
+        async def _fetch_models():
+            try:
+                return await p_instance.list_models()
+            finally:
+                if hasattr(p_instance, "aclose"):
+                    await p_instance.aclose()
+
+        with pulse_status(f"Fetching models from {p_name}..."):
+            models = asyncio.run(_fetch_models())
+
+        table = Table(
+            title=f"Models for {p_name}",
+            title_style="bold #f8fafc",
+            box=box.ROUNDED,
+            border_style=BORDER,
+            header_style=f"bold {ACCENT}",
+        )
+        table.add_column("Model ID", style="bold #f8fafc")
+        table.add_column("Tool Calling", justify="center")
+        table.add_column("Context Window", style=MUTED, justify="right")
 
         for m in models:
             caps = m.capabilities or p_instance.get_capabilities(m.id)
-            tools_str = "[green]Yes[/green]" if caps.tool_calling else "[dim]No[/dim]"
+            tools_str = f"[{SUCCESS}]✓ Yes[/{SUCCESS}]" if caps.tool_calling else f"[{DIM}]— No[/{DIM}]"
             ctx_str = f"{caps.max_context_tokens:,}" if caps.max_context_tokens else "(unknown)"
             table.add_row(m.id, tools_str, ctx_str)
 
         if not models:
-            table.add_row(cfg.providers[p_name].model, "[green]Yes[/green]", "128,000")
+            table.add_row(cfg.providers[p_name].model, f"[{SUCCESS}]✓ Yes[/{SUCCESS}]", "128,000")
 
         console.print(table)
         return
 
-    table = Table(title="Available Default Models")
-    table.add_column("Provider", style="bold")
-    table.add_column("Default Model")
+    table = Table(
+        title="Available Default Models",
+        title_style="bold #f8fafc",
+        box=box.ROUNDED,
+        border_style=BORDER,
+        header_style=f"bold {ACCENT}",
+    )
+    table.add_column("Provider", style="bold #f8fafc")
+    table.add_column("Default Model", style=MUTED)
 
     for name, p in cfg.providers.items():
         table.add_row(name, p.model or "(none)")
@@ -274,12 +330,19 @@ def sessions_list(
         console.print("[dim]No sessions found for this workspace.[/dim]")
         return
 
+    from rich import box
     from rich.table import Table
-    table = Table(title=f"Sessions ({app_ctx.workspace_root})")
-    table.add_column("ID", style="dim")
-    table.add_column("Title", style="bold")
-    table.add_column("Provider/Model")
-    table.add_column("Updated At", style="dim")
+    table = Table(
+        title=f"Sessions ({app_ctx.workspace_root})",
+        title_style="bold #f8fafc",
+        box=box.ROUNDED,
+        border_style=BORDER,
+        header_style=f"bold {ACCENT}",
+    )
+    table.add_column("ID", style=DIM)
+    table.add_column("Title", style="bold #f8fafc")
+    table.add_column("Provider/Model", style=ACCENT_ALT)
+    table.add_column("Updated At", style=MUTED)
 
     for s in sessions:
         table.add_row(s["id"][:8], s["title"], f"{s['provider']}/{s['model']}", s["updated_at"][:19])
@@ -380,38 +443,87 @@ def interactive_session(
     workspace: Optional[Path] = None,
     provider: Optional[str] = None,
     model: Optional[str] = None,
+    api_key: Optional[str] = None,
     session_id: Optional[str] = None,
+    debug: bool = False,
 ) -> None:
-    """Run interactive terminal session with in-session slash commands (Section 13.2)."""
+    """Run interactive terminal session with startup provider/key/model prompts and slash commands (Section 13.2)."""
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.formatted_text import HTML
     from Relay.agent.runtime import AgentRuntime
     from Relay.security.permissions import PermissionManager
 
-    app_ctx = create_app_context(workspace_root=workspace, provider=provider, model=model)
-    perm_manager = PermissionManager(mode=app_ctx.config.permission_mode, workspace_root=app_ctx.workspace_root)
-    runtime = AgentRuntime(app_context=app_ctx, permission_manager=perm_manager)
+    print_banner(animate=True)
 
-    if session_id:
+    selected_provider = provider
+    selected_model = model
+    selected_key = api_key
+
+    if session_id is None and selected_provider is None:
+        base_cfg = load_config(workspace_root=workspace)
         try:
-            state = runtime.resume_session(session_id)
-            console.print(f"[green]Resumed session {state.session_id[:8]} ({len(state.messages)} prior messages)[/green]")
-        except Exception as e:
-            console.print(f"[red]Could not resume session ({e}). Creating new session.[/red]")
-            state = runtime.create_session(provider=provider, model=model)
-    else:
-        state = runtime.create_session(provider=provider, model=model)
+            selected_provider, selected_model, selected_key = prompt_credentials_interactive(
+                provider=selected_provider,
+                model=selected_model,
+                api_key=selected_key,
+                default_provider=base_cfg.default_provider,
+            )
+        except (KeyboardInterrupt, EOFError):
+            console.print(f"\n[{DIM}]Setup cancelled. Goodbye![/{DIM}]")
+            return
 
-    print_banner()
-    console.print(f"Connected to [bold cyan]{state.provider_name}/{state.model_name}[/bold cyan] | Mode: [bold yellow]{perm_manager.mode}[/bold yellow]")
-    console.print("Type your coding request, or [bold]/help[/bold] for commands. Ctrl+C or [bold]/quit[/bold] to exit.\n")
+        if selected_key:
+            save_provider_credential(selected_provider, selected_key)
+
+    with pulse_status("Initializing workspace & agent runtime...", min_duration=0.25):
+        app_ctx = create_app_context(
+            workspace_root=workspace,
+            provider=selected_provider,
+            model=selected_model,
+            api_key=selected_key,
+            debug=debug,
+        )
+        perm_manager = PermissionManager(mode=app_ctx.config.permission_mode, workspace_root=app_ctx.workspace_root)
+        runtime = AgentRuntime(app_context=app_ctx, permission_manager=perm_manager)
+
+        if session_id:
+            try:
+                state = runtime.resume_session(session_id)
+                resumed_note = f"Resumed session {state.session_id[:8]} ({len(state.messages)} prior messages)"
+            except Exception as e:
+                resumed_note = f"Could not resume session ({e}). Started new session."
+                state = runtime.create_session(provider=selected_provider, model=selected_model)
+        else:
+            resumed_note = None
+            state = runtime.create_session(provider=selected_provider, model=selected_model)
+
+    if resumed_note:
+        console.print(f"[{MUTED}]{resumed_note}[/{MUTED}]")
+
+    print_session_card(
+        provider=state.provider_name,
+        model=state.model_name,
+        mode=perm_manager.mode,
+        workspace=str(state.workspace_root),
+        session_id=state.session_id,
+    )
 
     prompt_session = PromptSession()
 
     while True:
         try:
-            user_input = prompt_session.prompt("relay > ").strip()
+            toolbar = HTML(
+                f" <b>{state.provider_name}</b>/{state.model_name}  ·  "
+                f"mode: <b>{perm_manager.mode}</b>  ·  "
+                "<b>/help</b> commands  ·  <b>/quit</b> exit "
+            )
+            user_input = prompt_session.prompt(
+                HTML("<prompt-label>relay</prompt-label> <ansibrightcyan>❯</ansibrightcyan> "),
+                bottom_toolbar=toolbar,
+                style=RELAY_PROMPT_STYLE,
+            ).strip()
         except (KeyboardInterrupt, EOFError):
-            console.print("\n[dim]Goodbye![/dim]")
+            console.print(f"\n[{DIM}]Goodbye![/{DIM}]")
             break
 
         if not user_input:
@@ -423,47 +535,120 @@ def interactive_session(
             cmd = parts[0].lower()
 
             if cmd in ("/quit", "/exit"):
-                console.print("[dim]Goodbye![/dim]")
+                console.print(f"[{DIM}]Goodbye![/{DIM}]")
                 break
             elif cmd == "/help":
+                from rich import box
+                from rich.panel import Panel
+                help_text = (
+                    f"[{ACCENT}]/help[/{ACCENT}]              Show this command reference\n"
+                    f"[{ACCENT}]/model[/{ACCENT}]             Switch provider, API key, or model mid-session\n"
+                    f"[{ACCENT}]/diff[/{ACCENT}]              Show working tree git diff\n"
+                    f"[{ACCENT}]/status[/{ACCENT}]            Show active provider, model, permissions, and stats\n"
+                    f"[{ACCENT}]/permissions [m][/{ACCENT}]   Inspect or switch mode (plan, ask, auto-edit, full-auto)\n"
+                    f"[{ACCENT}]/sessions[/{ACCENT}]          List recent workspace sessions\n"
+                    f"[{ACCENT}]/export [format][/{ACCENT}]   Export session transcript (markdown or json)\n"
+                    f"[{ACCENT}]/clear[/{ACCENT}]             Clear the terminal screen\n"
+                    f"[{ACCENT}]/quit[/{ACCENT}]              Exit interactive session"
+                )
+                console.print(Panel(help_text, title="Interactive Commands", box=box.ROUNDED, border_style=BORDER, expand=False))
+                continue
+            elif cmd in ("/model", "/models"):
+                from Relay.providers.registry import ProviderRegistry
+
+                try:
+                    new_provider = state.provider_name
+                    new_model = state.model_name
+                    new_key: Optional[str] = None
+
+                    if len(parts) == 1:
+                        # Full interactive switcher: Provider dropdown -> API key box -> Model box
+                        new_provider, new_model, new_key = prompt_credentials_interactive(
+                            default_provider=state.provider_name,
+                        )
+                    elif len(parts) == 2:
+                        arg = parts[1].strip()
+                        arg_lower = arg.lower()
+                        if ProviderRegistry.is_registered(arg_lower):
+                            # Switch to selected registered provider, prompting for key & model
+                            _, new_model, new_key = prompt_credentials_interactive(
+                                provider=arg_lower,
+                            )
+                            new_provider = arg_lower
+                        elif "/" in arg and state.provider_name != "openrouter":
+                            cand_provider, cand_model = arg.split("/", 1)
+                            if ProviderRegistry.is_registered(cand_provider.lower()):
+                                new_provider = cand_provider.lower()
+                                new_model = cand_model.strip()
+                                if new_provider != "ollama" and not SecretManager.get_credential(f"relay/{new_provider}"):
+                                    new_key = prompt_api_key(new_provider)
+                            else:
+                                new_model = arg
+                        else:
+                            new_model = arg
+                    else:
+                        # /model <provider> <model>
+                        cand_provider = parts[1].strip().lower()
+                        if not ProviderRegistry.is_registered(cand_provider):
+                            console.print(
+                                f"[{ERROR}]Unknown provider '{cand_provider}'. Available: {', '.join(ProviderRegistry.list_providers())}[/{ERROR}]"
+                            )
+                            continue
+                        new_provider = cand_provider
+                        new_model = " ".join(parts[2:]).strip()
+                        if new_provider != "ollama" and not SecretManager.get_credential(f"relay/{new_provider}"):
+                            new_key = prompt_api_key(new_provider)
+                except (KeyboardInterrupt, EOFError):
+                    console.print(f"\n[{DIM}]Model switch cancelled. Keeping {state.provider_name}/{state.model_name}.[/{DIM}]")
+                    continue
+
+                if new_key:
+                    save_provider_credential(new_provider, new_key)
+
+                state.provider_name = new_provider
+                state.model_name = new_model
+                if new_provider in app_ctx.config.providers:
+                    app_ctx.config.providers[new_provider].model = new_model
+                app_ctx.session_store.update_session_model(state.session_id, new_provider, new_model)
+                app_ctx.event_store.record_event(
+                    event_type="model_switched",
+                    payload={"provider": new_provider, "model": new_model},
+                    session_id=state.session_id,
+                )
                 console.print(
-                    "[bold]Available Interactive Commands:[/bold]\n"
-                    "  /help              Show this help reference\n"
-                    "  /diff              Show working tree git diff\n"
-                    "  /status            Show active provider, model, permissions, and stats\n"
-                    "  /permissions [m]   Inspect or switch permission mode (plan, ask, auto-edit, full-auto)\n"
-                    "  /sessions          List recent workspace sessions\n"
-                    "  /export [format]   Export current session transcript (markdown or json)\n"
-                    "  /clear             Clear the terminal screen\n"
-                    "  /quit              Exit interactive session\n"
+                    f"[{SUCCESS}]● Switched active model to [bold {ACCENT}]{new_provider}[/bold {ACCENT}]/[bold {ACCENT_ALT}]{new_model}[/bold {ACCENT_ALT}].[/{SUCCESS}]"
                 )
                 continue
             elif cmd == "/diff":
                 diff = runtime.get_diff()
                 if diff:
+                    from rich import box
                     from rich.panel import Panel
                     from rich.syntax import Syntax
-                    console.print(Panel(Syntax(diff, "diff", theme="monokai", line_numbers=True), title="Git Diff"))
+                    console.print(Panel(Syntax(diff, "diff", theme="monokai", line_numbers=True), title="Git Diff", box=box.ROUNDED, border_style=BORDER))
                 else:
-                    console.print("[dim]No working tree modifications.[/dim]")
+                    console.print(f"[{DIM}]No working tree modifications.[/{DIM}]")
                 continue
             elif cmd == "/status":
-                console.print(
-                    f"Session: {state.session_id}\n"
-                    f"Provider: {state.provider_name}\n"
-                    f"Model: {state.model_name}\n"
-                    f"Permission Mode: {perm_manager.mode}\n"
-                    f"Turn count: {state.turn_count}\n"
-                    f"Total tokens used: {state.total_tokens_used}\n"
-                    f"Files modified: {', '.join(state.changed_files) if state.changed_files else 'None'}"
+                from rich import box
+                from rich.panel import Panel
+                status_body = (
+                    f"[{DIM}]Session:[/{DIM}]         {state.session_id}\n"
+                    f"[{DIM}]Provider:[/{DIM}]        [{ACCENT}]{state.provider_name}[/{ACCENT}]\n"
+                    f"[{DIM}]Model:[/{DIM}]           [{ACCENT_ALT}]{state.model_name}[/{ACCENT_ALT}]\n"
+                    f"[{DIM}]Permission Mode:[/{DIM}] [{WARNING}]{perm_manager.mode}[/{WARNING}]\n"
+                    f"[{DIM}]Turn Count:[/{DIM}]      {state.turn_count}\n"
+                    f"[{DIM}]Total Tokens:[/{DIM}]    {state.total_tokens_used:,}\n"
+                    f"[{DIM}]Files Modified:[/{DIM}]  {', '.join(state.changed_files) if state.changed_files else 'None'}"
                 )
+                console.print(Panel(status_body, title="Session Status", box=box.ROUNDED, border_style=BORDER, expand=False))
                 continue
             elif cmd == "/permissions":
                 if len(parts) > 1 and parts[1] in ("plan", "ask", "auto-edit", "full-auto"):
                     perm_manager.mode = parts[1]
-                    console.print(f"[green]Permission mode switched to '{parts[1]}'.[/green]")
+                    console.print(f"[{SUCCESS}]● Permission mode switched to '{parts[1]}'.[/{SUCCESS}]")
                 else:
-                    console.print(f"Current mode: [bold yellow]{perm_manager.mode}[/bold yellow]. Use '/permissions [plan|ask|auto-edit|full-auto]' to change.")
+                    console.print(f"Current mode: [bold {WARNING}]{perm_manager.mode}[/bold {WARNING}]. Use '/permissions [plan|ask|auto-edit|full-auto]' to change.")
                 continue
             elif cmd == "/sessions":
                 sessions_list(workspace=app_ctx.workspace_root)
@@ -474,61 +659,143 @@ def interactive_session(
                 continue
             elif cmd == "/clear":
                 console.clear()
+                print_banner(animate=False)
                 continue
             else:
-                console.print(f"[yellow]Unknown slash command '{cmd}'. Type /help for available commands.[/yellow]")
+                console.print(f"[{WARNING}]Unknown command '{cmd}'. Type /help for available commands.[/{WARNING}]")
                 continue
 
         # Normal prompt turn
         try:
             asyncio.run(_run_turn_stream(runtime, state, user_input))
         except KeyboardInterrupt:
-            console.print("\n[yellow]Turn cancelled by user.[/yellow]")
+            console.print(f"\n[{WARNING}]Turn cancelled by user.[/{WARNING}]")
             runtime.cancel(state)
 
 
 async def _run_turn_stream(runtime, state, prompt: str) -> None:
-    """Stream agent execution turn events to terminal."""
+    """Stream agent execution turn events to terminal with live status and Markdown rendering."""
+    import sys
+    from rich import box
+    from rich.live import Live
+    from rich.markdown import Markdown
     from rich.panel import Panel
     from rich.syntax import Syntax
 
-    console.print(f"\n[bold cyan]Relay Agent[/bold cyan] ({state.provider_name}/{state.model_name})")
-    console.print(f"[dim]Workspace: {state.workspace_root}[/dim]\n")
+    console.print(
+        f"\n[bold {ACCENT}]◆ Relay[/bold {ACCENT}] [{DIM}]·[/{DIM}] [{ACCENT_ALT}]{state.provider_name}/{state.model_name}[/{ACCENT_ALT}]"
+    )
+    console.print(f"[{DIM}]{state.workspace_root}[/{DIM}]\n")
 
-    current_text_line = []
-    async for event in runtime.run_turn(state, prompt):
-        if event.event_type == "text_delta" and event.text_delta:
-            console.print(event.text_delta, end="", highlight=False)
-            current_text_line.append(event.text_delta)
-        elif event.event_type == "tool_call_requested" and event.tool_call:
-            if current_text_line:
-                console.print()
-                current_text_line = []
-            console.print(f"\n[bold blue]🛠️  Tool:[/bold blue] [cyan]{event.tool_call.name}[/cyan] [dim]{event.tool_call.arguments}[/dim]")
-        elif event.event_type == "tool_call_completed" and event.tool_result:
-            duration = f"{event.tool_result.duration_ms}ms" if event.tool_result.duration_ms else ""
-            console.print(f"[green]✓ Completed {duration}[/green]")
-            if event.tool_result.content and len(event.tool_result.content) < 300:
-                console.print(f"[dim]{event.tool_result.content.strip()}[/dim]")
-        elif event.event_type == "tool_call_failed" and event.tool_result:
-            console.print(f"[bold red]✗ Failed:[/bold red] {event.tool_result.content.strip()}")
-        elif event.event_type == "file_changed" and event.file_path:
-            console.print(f"[bold yellow]📝 Modified file:[/bold yellow] [bold]{event.file_path}[/bold]")
-        elif event.event_type == "error":
-            console.print(f"\n[bold red]Error:[/bold red] {event.error}")
-        elif event.event_type == "stop_condition_met":
-            console.print(f"\n[dim magenta]⏹️  {event.message}[/dim magenta]")
+    is_tty = bool(sys.stdout and sys.stdout.isatty())
+    active_status = None
+    markdown_live: Optional[Live] = None
+    text_chunks: list[str] = []
 
-    console.print("\n")
+    def _start_spinner(label: str) -> None:
+        nonlocal active_status
+        if not is_tty:
+            return
+        _stop_spinner()
+        active_status = console.status(f"[{MUTED}]{label}[/{MUTED}]", spinner="dots2", spinner_style=ACCENT)
+        active_status.start()
+
+    def _stop_spinner() -> None:
+        nonlocal active_status
+        if active_status is not None:
+            active_status.stop()
+            active_status = None
+
+    def _update_markdown() -> None:
+        nonlocal markdown_live
+        rendered = Markdown("".join(text_chunks), code_theme="monokai", inline_code_theme="monokai")
+        if is_tty:
+            if markdown_live is None:
+                markdown_live = Live(
+                    rendered,
+                    console=console,
+                    refresh_per_second=12,
+                    vertical_overflow="visible",
+                )
+                markdown_live.start()
+            else:
+                markdown_live.update(rendered)
+
+    def _flush_markdown() -> None:
+        nonlocal markdown_live
+        if not text_chunks:
+            return
+        full_text = "".join(text_chunks)
+        rendered = Markdown(full_text, code_theme="monokai", inline_code_theme="monokai")
+        if markdown_live is not None:
+            markdown_live.update(rendered, refresh=True)
+            markdown_live.stop()
+            markdown_live = None
+        else:
+            console.print(rendered)
+        text_chunks.clear()
+
+    _start_spinner("Thinking...")
+    try:
+        async for event in runtime.run_turn(state, prompt):
+            if event.event_type == "text_delta" and event.text_delta:
+                _stop_spinner()
+                text_chunks.append(event.text_delta)
+                _update_markdown()
+            elif event.event_type == "tool_call_requested" and event.tool_call:
+                _stop_spinner()
+                _flush_markdown()
+                console.print(
+                    f"\n[bold {ACCENT}]⚙ {event.tool_call.name}[/bold {ACCENT}] [{DIM}]{event.tool_call.arguments}[/{DIM}]"
+                )
+                _start_spinner(f"Executing {event.tool_call.name}...")
+            elif event.event_type == "tool_call_completed" and event.tool_result:
+                _stop_spinner()
+                duration = f" ({event.tool_result.duration_ms}ms)" if event.tool_result.duration_ms else ""
+                console.print(f"[{SUCCESS}]✓ Completed{duration}[/{SUCCESS}]")
+                if event.tool_result.content and len(event.tool_result.content) < 300:
+                    console.print(f"[{DIM}]{event.tool_result.content.strip()}[/{DIM}]")
+                _start_spinner("Thinking...")
+            elif event.event_type == "tool_call_failed" and event.tool_result:
+                _stop_spinner()
+                console.print(f"[bold {ERROR}]✖ Failed:[/bold {ERROR}] {event.tool_result.content.strip()}")
+                _start_spinner("Thinking...")
+            elif event.event_type == "file_changed" and event.file_path:
+                _stop_spinner()
+                _flush_markdown()
+                console.print(f"[{WARNING}]◆ Modified:[/{WARNING}] [bold #f8fafc]{event.file_path}[/bold #f8fafc]")
+            elif event.event_type == "error":
+                _stop_spinner()
+                _flush_markdown()
+                console.print(f"\n[bold {ERROR}]Error:[/bold {ERROR}] {event.error}")
+            elif event.event_type == "stop_condition_met":
+                _stop_spinner()
+                _flush_markdown()
+                console.print(f"\n[{MUTED}]⏹ {event.message}[/{MUTED}]")
+    finally:
+        _stop_spinner()
+        _flush_markdown()
+
+    console.print()
     summary = runtime.summarize_changes(state)
     if summary["changed_files"]:
-        console.print("[bold green]Files Changed:[/bold green]")
+        console.print(f"[bold {SUCCESS}]Files Changed:[/bold {SUCCESS}]")
         for f in summary["changed_files"]:
-            console.print(f" - [bold]{f}[/bold]")
+            console.print(f"  [{ACCENT}]•[/{ACCENT}] [bold #f8fafc]{f}[/bold #f8fafc]")
         if summary.get("diff"):
-            console.print(Panel(Syntax(summary["diff"], "diff", theme="monokai", line_numbers=True), title="Diff"))
+            console.print(
+                Panel(
+                    Syntax(summary["diff"], "diff", theme="monokai", line_numbers=True),
+                    title="Diff",
+                    box=box.ROUNDED,
+                    border_style=BORDER,
+                )
+            )
 
-    console.print(f"[dim]Tokens used: {summary['tokens']['total']} (prompt: {summary['tokens']['prompt']}, completion: {summary['tokens']['completion']})[/dim]")
+    console.print(
+        f"[{DIM}]Tokens: {summary['tokens']['total']:,} "
+        f"(prompt {summary['tokens']['prompt']:,} · completion {summary['tokens']['completion']:,})[/{DIM}]"
+    )
 
 
 def ask_command(

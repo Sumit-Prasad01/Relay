@@ -68,6 +68,15 @@ class SessionStore:
                 (title, now_utc, session_id),
             )
 
+    def update_session_model(self, session_id: str, provider: str, model: str) -> None:
+        """Update active provider and model for an existing session."""
+        now_utc = datetime.now(timezone.utc).isoformat()
+        with self.db.transaction() as conn:
+            conn.execute(
+                "UPDATE sessions SET provider = ?, model = ?, updated_at = ? WHERE id = ?",
+                (provider, model, now_utc, session_id),
+            )
+
     def append_message(
         self,
         session_id: str,

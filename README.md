@@ -1,18 +1,19 @@
 # Relay
 
-A provider-agnostic, local-first, BYOK AI coding agent.
+A provider-agnostic, local-first, BYOK AI coding agent for your terminal.
 
-Relay operates directly in your terminal, understands your codebase, plans and executes engineering tasks, runs tools, executes tests, and reports changes with unified diffs and audit logs.
+Relay understands existing codebases, plans and executes engineering tasks, runs tools and tests under strict permission boundaries, renders live Markdown responses, and persists sessions locally in SQLite.
 
 ---
 
 ## Key Features
 
-- **Provider-Agnostic & BYOK:** Works with **Groq**, **OpenAI**, **Anthropic Claude**, **Google Gemini**, **OpenRouter**, or local **Ollama** models.
-- **Local-First & Private:** Source files, execution, database state, and credentials remain strictly on your local machine.
-- **Robust Security & Permissions:** Strict permission boundaries with 4 modes (`plan`, `ask`, `auto-edit`, `full-auto`), path-traversal prevention, command classification, and pre-write snapshots with unified diff rollbacks.
-- **Autonomous Agent Runtime:** Resilient agent execution loop with token budgeting, context compaction, retries with exponential backoff, and full streaming support.
-- **Advanced Workflows:** Multi-step workflows including plan-and-execute, parallel specialist subagents, debug-and-repair, and automated code review with SQLite checkpointing.
+- **Provider-Agnostic & BYOK:** Supports **OpenRouter**, **Groq**, **Anthropic Claude**, **OpenAI**, **Google Gemini**, and local **Ollama** models behind a single normalized interface.
+- **Interactive Onboarding & Dark Terminal UI:** Launching `relay` opens an animated dark interface with a provider selection dropdown, masked OS-keyring API key prompt, model input box, live thinking/tool spinners, and real-time Markdown streaming.
+- **Mid-Session Model Switching (`/model`):** Switch providers, API keys, or models seamlessly mid-conversation with automatic SQLite session updates.
+- **Local-First & Private:** Source files, command execution, SQLite history, and OS keyring credentials remain strictly on your local machine.
+- **Robust Security & Permissions:** 4 permission modes (`plan`, `ask`, `auto-edit`, `full-auto`), path-traversal protection, lexical command risk classification, and pre-write snapshots with unified diffs.
+- **Autonomous Agent Runtime & Workflows:** Streaming turn loop with token budgeting, transcript compaction, retries with exponential backoff, and LangGraph plan/review/repair workflows.
 - **Extensible:** Model Context Protocol (MCP) stdio client, `.agents/skills` discovery, and configurable lifecycle hooks.
 
 ---
@@ -23,15 +24,21 @@ Relay operates directly in your terminal, understands your codebase, plans and e
 - Python 3.11 or newer
 - Git
 
-### Install via pip / editable
+### Install via pip (editable)
 ```bash
-git clone https://github.com/your-username/relay.git
-cd relay
-pip install -e .
+git clone <your-repo-url>
+cd Relay
+python -m venv .venv
+
+# Windows (PowerShell): .\.venv\Scripts\Activate.ps1
+# Windows (Git Bash):   source .venv/Scripts/activate
+# macOS / Linux:        source .venv/bin/activate
+
+pip install -e ".[dev]"
 ```
 
 ### Verify Environment
-Run diagnostics to verify Python version, Keyring secure storage, Git, and SQLite:
+Run diagnostics to verify Python version, OS keyring availability, Git, Ripgrep, and SQLite migrations:
 ```bash
 relay doctor
 ```
@@ -40,88 +47,82 @@ relay doctor
 
 ## Quick Start
 
-### 1. Configure Providers
-Add credentials for any supported provider (secrets are stored securely in your OS keyring):
-```bash
-# 1. Configure OpenRouter
-relay provider add openrouter --model anthropic/claude-3.5-sonnet --api-key <YOUR_KEY>
-
-# 2. Configure Groq
-relay provider add groq --model llama-3.3-70b-versatile --api-key <YOUR_KEY>
-
-# 3. Configure Anthropic
-relay provider add anthropic --model claude-3-5-sonnet-20241022 --api-key <YOUR_KEY>
-
-# 4. Configure OpenAI
-relay provider add openai --model gpt-4o --api-key <YOUR_KEY>
-
-# 5. Configure Google Gemini
-relay provider add gemini --model gemini-1.5-pro --api-key <YOUR_KEY>
-
-# 6. Configure Local Ollama (No API key needed)
-relay provider add ollama --model qwen2.5-coder:latest
-
-# List all configured providers
-relay provider list
-
-# Test provider connectivity and validate credentials
-relay provider test openrouter
-relay provider test ollama
-relay provider test groq
-```
-
-### 2. Initialize Workspace
-```bash
-relay init
-```
-This generates `.relay/` and an `AGENTS.md` project instruction template.
-
-### 3. Run Tasks
-
-#### Autonomous Execution (`ask`)
-```bash
-relay ask "Find all unused imports in the codebase and remove them"
-```
-
-#### Read-Only Planning (`plan`)
-Inspects the repository and generates an execution plan without modifying any files:
-```bash
-relay plan "Refactor session database queries to use connection pooling"
-```
-
-#### Interactive Terminal Session
+### 1. Launch Interactive Session (Recommended)
+Simply run `relay` in any repository directory:
 ```bash
 relay
 ```
-In an interactive session, you can converse directly with the agent or use slash commands:
-- `/help`: Display in-session command guide
-- `/diff`: Show working tree unified git diff
-- `/status`: Show active provider, model, permissions, and session tokens
-- `/permissions [mode]`: Switch between `plan`, `ask`, `auto-edit`, or `full-auto`
-- `/sessions`: List previous sessions
-- `/export [format]`: Export session transcript to `markdown` or `json`
-- `/clear`: Clear terminal display
-- `/quit`: Exit interactive session
+Relay launches a guided startup flow:
+1. **Provider Dropdown:** Choose from OpenRouter, Groq, Anthropic, OpenAI, Google Gemini, or Ollama using `↑`/`↓` or number keys `1–6`.
+2. **API Key Box:** Paste your API key (saved securely in your OS keyring; press `Enter` on future launches to reuse your saved key, or skip for local Ollama).
+3. **Model Name Box:** Enter the model ID you want to use.
+
+You can bypass the startup flow anytime with CLI flags:
+```bash
+relay --provider openai --model gpt-4o
+relay --debug   # Enable verbose HTTP and diagnostic logging
+```
+
+### 2. Interactive Slash Commands
+Inside an interactive `relay` session:
+- `/help` — Show all interactive commands
+- `/model` — Switch provider, API key, or model mid-session (also supports `/model <model>`, `/model <provider>`, or `/model <provider> <model>`)
+- `/diff` — Show working tree unified git diff
+- `/status` — Show active provider, model, permission mode, modified files, and token usage
+- `/permissions [mode]` — Inspect or switch permission mode (`plan`, `ask`, `auto-edit`, `full-auto`)
+- `/sessions` — List recent sessions for the current workspace
+- `/export [format]` — Export the session transcript (`markdown` or `json`)
+- `/clear` — Clear the terminal screen
+- `/quit` — Exit the interactive session
+
+### 3. Pre-Configure Providers via CLI
+You can also configure or test providers directly from the command line:
+```bash
+relay provider add openrouter --model <MODEL_ID> --api-key <YOUR_KEY>
+relay provider add groq --model <MODEL_ID> --api-key <YOUR_KEY>
+relay provider add anthropic --model <MODEL_ID> --api-key <YOUR_KEY>
+relay provider add openai --model <MODEL_ID> --api-key <YOUR_KEY>
+relay provider add gemini --model <MODEL_ID> --api-key <YOUR_KEY>
+relay provider add ollama --model <MODEL_ID>
+
+relay provider list
+relay provider test <provider>
+```
+
+### 4. Workspace & Non-Interactive Tasks
+```bash
+# Generate .relay/ and AGENTS.md template
+relay init
+
+# Autonomous single-shot execution
+relay ask "Find all unused imports in the codebase and remove them"
+
+# Read-only analysis and planning
+relay plan "Refactor session database queries"
+```
 
 ---
 
-## Configuration & Architecture
+## Configuration & Security
 
-Relay loads configuration from:
-1. CLI flags (`--provider`, `--model`, `--workspace`)
-2. Environment variables (`GROQ_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.)
-3. Workspace configuration (`.relay/config.toml`)
-4. Global user configuration (`~/.config/relay/config.toml`)
+Relay resolves configuration in strict precedence order:
+1. CLI flags (`--provider`, `--model`, `--api-key`, `--workspace`, `--debug`)
+2. Environment variables (`OPENROUTER_API_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `RELAY_DEFAULT_PROVIDER`, `RELAY_PERMISSION_MODE`)
+3. Workspace config (`.relay/config.toml` or `relay.toml`)
+4. Global user config (`~/.config/relay/config.toml`)
+5. Application defaults
 
 ### Permission Modes
-- **`plan`**: Read-only exploration. No file mutations or side-effect commands permitted.
-- **`ask`** (Default): Reads allowed automatically; writes and external commands prompt for user approval.
-- **`auto-edit`**: File writes and patches within the workspace root are automatically allowed; terminal commands still prompt.
-- **`full-auto`**: Fully autonomous operation within workspace security constraints.
+- **`plan`**: Read-only exploration. No file writes or state-changing commands permitted.
+- **`ask`** (Default): Read operations run automatically; file writes and shell commands prompt for approval.
+- **`auto-edit`**: In-workspace file edits are allowed automatically; terminal commands and out-of-workspace access prompt for approval.
+- **`full-auto`**: Opt-in autonomous workflow mode scoped to the workspace; destructive commands remain gated.
 
 ---
 
-## Testing
+## Architecture & Testing
+
+See [Relay/ARCHITECTURE.md](ARCHITECTURE.md) for system diagrams, module contracts, SQLite schema, and security boundaries.
 
 Run the automated test suite with pytest:
 ```bash

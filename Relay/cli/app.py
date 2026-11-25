@@ -54,7 +54,13 @@ def main(
     if ctx.invoked_subcommand is None:
         import sys
         if sys.stdin and sys.stdin.isatty():
-            interactive_session(workspace=workspace, provider=provider, model=model)
+            interactive_session(
+                workspace=workspace,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                debug=debug,
+            )
         else:
             print_banner()
             console.print("Run [bold cyan]relay --help[/bold cyan] to see available commands.")
