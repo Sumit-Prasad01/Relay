@@ -12,43 +12,43 @@ Relay is structured into decoupled, independently testable layers. The core runt
 
 ```mermaid
 flowchart TD
-    User([Developer / Terminal]) <--> CLI[CLI & Presentation Layer<br/>Relay/cli]
+    User(["Developer / Terminal"]) <--> CLI["CLI & Presentation Layer<br/>Relay/cli"]
     
-    subgraph Core Orchestration
-        CLI --> AppCtx[App Bootstrap & Context<br/>Relay/app.py]
-        AppCtx --> Runtime[Custom Agent Runtime<br/>Relay/agent]
-        AppCtx --> Workflows[LangGraph Workflow Engine<br/>Relay/workflows]
+    subgraph Core["Core Orchestration"]
+        CLI --> AppCtx["App Bootstrap & Context<br/>Relay/app.py"]
+        AppCtx --> Runtime["Custom Agent Runtime<br/>Relay/agent"]
+        AppCtx --> Workflows["LangGraph Workflow Engine<br/>Relay/workflows"]
     end
 
-    subgraph Provider Abstraction
-        Runtime <--> ProviderFactory[Provider Factory & Registry<br/>Relay/providers]
+    subgraph Providers["Provider Abstraction"]
+        Runtime <--> ProviderFactory["Provider Factory & Registry<br/>Relay/providers"]
         Workflows <--> ProviderFactory
-        ProviderFactory <--> OpenRouter[OpenRouter Adapter]
-        ProviderFactory <--> Groq[Groq Adapter]
-        ProviderFactory <--> Anthropic[Anthropic Adapter]
-        ProviderFactory <--> OpenAI[OpenAI Adapter]
-        ProviderFactory <--> Gemini[Google Gemini Adapter]
-        ProviderFactory <--> Ollama[Local Ollama Adapter]
+        ProviderFactory <--> OpenRouter["OpenRouter Adapter"]
+        ProviderFactory <--> Groq["Groq Adapter"]
+        ProviderFactory <--> Anthropic["Anthropic Adapter"]
+        ProviderFactory <--> OpenAI["OpenAI Adapter"]
+        ProviderFactory <--> Gemini["Google Gemini Adapter"]
+        ProviderFactory <--> Ollama["Local Ollama Adapter"]
     end
 
-    subgraph Security & Execution
-        Runtime --> PermEngine[Permission Manager & Policy<br/>Relay/security]
-        PermEngine --> ToolRegistry[Tool Registry & MCP Client<br/>Relay/tools]
-        ToolRegistry --> Sandbox[OS Sandbox Runner<br/>Windows / Linux / macOS]
-        ToolRegistry --> Snapshot[File Snapshots & Audit<br/>Relay/security/snapshots.py]
+    subgraph Security["Security & Execution"]
+        Runtime --> PermEngine["Permission Manager & Policy<br/>Relay/security"]
+        PermEngine --> ToolRegistry["Tool Registry & MCP Client<br/>Relay/tools"]
+        ToolRegistry --> Sandbox["OS Sandbox Runner<br/>Windows / Linux / macOS"]
+        ToolRegistry --> Snapshot["File Snapshots & Audit<br/>Relay/security/snapshots.py"]
     end
 
-    subgraph Context & Intelligence
-        Runtime <--> ContextEngine[Context Engine & Compaction<br/>Relay/context]
-        ContextEngine --> AST[Tree-sitter AST & BM25 Ranking]
-        ContextEngine --> ProjectDisc[Project Discovery & Ignore Rules]
-        ContextEngine --> Compactor[Autonomous Compactor Agent]
+    subgraph Context["Context & Intelligence"]
+        Runtime <--> ContextEngine["Context Engine & Compaction<br/>Relay/context"]
+        ContextEngine --> AST["Tree-sitter AST & BM25 Ranking"]
+        ContextEngine --> ProjectDisc["Project Discovery & Ignore Rules"]
+        ContextEngine --> Compactor["Autonomous Compactor Agent"]
     end
 
-    subgraph Persistence & Integrations
-        Runtime --> Storage[SQLite Storage Engine<br/>WAL Mode & Schema Migrations]
-        Workflows --> Storage
-        Runtime --> Integrations[Skills & Lifecycle Hooks<br/>Relay/integrations]
+    subgraph Storage["Persistence & Integrations"]
+        Runtime --> StorageEngine["SQLite Storage Engine<br/>WAL Mode & Schema Migrations"]
+        Workflows --> StorageEngine
+        Runtime --> Integrations["Skills & Lifecycle Hooks<br/>Relay/integrations"]
     end
 ```
 
@@ -167,16 +167,16 @@ Running `relay` in an interactive TTY executes an explicit onboarding and mid-se
 
 ```mermaid
 flowchart LR
-    Start([relay CLI launch]) --> Banner[Animated Dark Banner<br/>Rich.Live Reveal]
-    Banner --> Flags{--provider supplied<br/>or resume?}
-    Flags -- No --> Dropdown[Provider Dropdown<br/>openrouter / groq / anthropic / openai / gemini / ollama]
-    Dropdown --> KeyBox[Masked API Key Box<br/>Keyring Lookup & Save]
-    KeyBox --> ModelBox[Model Name Input Box<br/>Empty Default, No Demo Names]
+    Start(["relay CLI launch"]) --> Banner["Animated Dark Banner<br/>Rich Live Reveal"]
+    Banner --> Flags{"CLI --provider flag<br/>or resume?"}
+    Flags -- No --> Dropdown["Provider Dropdown<br/>openrouter / groq / anthropic / openai / gemini / ollama"]
+    Dropdown --> KeyBox["Masked API Key Box<br/>Keyring Lookup & Save"]
+    KeyBox --> ModelBox["Model Name Input Box<br/>Empty Default, No Demo Names"]
     Flags -- Yes --> Init
-    ModelBox --> Init[pulse_status Spinner &<br/>Session Card]
-    Init --> REPL[Dark REPL Loop<br/>relay > + Bottom Toolbar]
-    REPL -->|/model| Dropdown
-    REPL -->|User Prompt| Stream[Live Markdown Renderer +<br/>Thinking/Tool Spinners]
+    ModelBox --> Init["pulse_status Spinner &<br/>Session Card"]
+    Init --> REPL["Dark REPL Loop<br/>relay prompt + Bottom Toolbar"]
+    REPL -- "/model" --> Dropdown
+    REPL -- "User Prompt" --> Stream["Live Markdown Renderer +<br/>Thinking & Tool Spinners"]
     Stream --> REPL
 ```
 
@@ -263,22 +263,22 @@ Relay provides specialized subagents with strictly bounded tool permissions:
 
 ```mermaid
 flowchart TD
-    subgraph Plan and Execute Workflow
-        P1[User Goal] --> P2[Planner Subagent]
-        P2 --> P3{Review Plan}
-        P3 -->|Approved| P4[Execution Subagent]
-        P4 --> P5{Verification}
-        P5 -->|Pass| P6[Completed]
-        P5 -->|Fail| P2
+    subgraph PlanExec["Plan and Execute Workflow"]
+        P1["User Goal"] --> P2["Planner Subagent"]
+        P2 --> P3{"Review Plan"}
+        P3 -- "Approved" --> P4["Execution Subagent"]
+        P4 --> P5{"Verification"}
+        P5 -- "Pass" --> P6["Completed"]
+        P5 -- "Fail" --> P2
     end
 
-    subgraph Test and Repair Workflow
-        T1[Test Failure Detected] --> T2[Tester: Diagnose Failure]
-        T2 --> T3[Implementer: Targeted Patch]
-        T3 --> T4[Tester: Run Tests]
-        T4 -->|Pass| T5[Verified Fix]
-        T4 -->|Fail & Iterations < Max| T2
-        T4 -->|Fail & Iterations >= Max| T6[Halt & Escalate to User]
+    subgraph TestRepair["Test and Repair Workflow"]
+        T1["Test Failure Detected"] --> T2["Tester: Diagnose Failure"]
+        T2 --> T3["Implementer: Targeted Patch"]
+        T3 --> T4["Tester: Run Tests"]
+        T4 -- "Pass" --> T5["Verified Fix"]
+        T4 -- "Fail and retries remain" --> T2
+        T4 -- "Fail and max retries reached" --> T6["Halt & Escalate to User"]
     end
 ```
 
@@ -296,28 +296,28 @@ Security in Relay is governed by the `PermissionManager`, which evaluates every 
 
 ```mermaid
 flowchart TD
-    ToolCall[Model Tool Call Request] --> ModeCheck{Active Permission Mode}
+    ToolCall["Model Tool Call Request"] --> ModeCheck{"Active Permission Mode"}
 
-    ModeCheck -->|plan| PlanGate{Is Tool Read-Only?}
-    PlanGate -->|Yes| AllowExec[Allow Execution]
-    PlanGate -->|No| BlockPlan[Block: Plan mode permits reads only]
+    ModeCheck -- "plan" --> PlanGate{"Is Tool Read-Only?"}
+    PlanGate -- "Yes" --> AllowExec["Allow Execution"]
+    PlanGate -- "No" --> BlockPlan["Block: Plan mode permits reads only"]
 
-    ModeCheck -->|ask| AskGate{Risk Classification}
-    AskGate -->|Read-Only| AllowExec
-    AskGate -->|Mutation / Network / Destructive / Unknown| PromptUser[Prompt User Approval (y/n)]
-    PromptUser -->|User Approved| AllowExec
-    PromptUser -->|User Denied| BlockAsk[Return User Denial Error]
+    ModeCheck -- "ask" --> AskGate{"Risk Classification"}
+    AskGate -- "Read-Only" --> AllowExec
+    AskGate -- "Mutation / Network / Destructive / Unknown" --> PromptUser["Prompt User Approval (y/n)"]
+    PromptUser -- "User Approved" --> AllowExec
+    PromptUser -- "User Denied" --> BlockAsk["Return User Denial Error"]
 
-    ModeCheck -->|auto-edit| AutoGate{Is In-Workspace Edit?}
-    AutoGate -->|Yes| AllowExec
-    AutoGate -->|Terminal / Network / Destructive| PromptUser
+    ModeCheck -- "auto-edit" --> AutoGate{"Is In-Workspace Edit?"}
+    AutoGate -- "Yes" --> AllowExec
+    AutoGate -- "Terminal / Network / Destructive" --> PromptUser
 
-    ModeCheck -->|full-auto| FullGate{Is Destructive or Credential?}
-    FullGate -->|Destructive / Credential Sensitive| PromptUser
-    FullGate -->|Standard Development Action| AllowExec
+    ModeCheck -- "full-auto" --> FullGate{"Is Destructive or Credential?"}
+    FullGate -- "Destructive / Credential Sensitive" --> PromptUser
+    FullGate -- "Standard Development Action" --> AllowExec
 
-    AllowExec --> Sandbox[OS Sandbox Execution Boundary]
-    Sandbox --> Snapshot[Record Filesystem Snapshot Hash]
+    AllowExec --> Sandbox["OS Sandbox Execution Boundary"]
+    Sandbox --> Snapshot["Record Filesystem Snapshot Hash"]
 ```
 
 ### 6.1 Four-Tier Permission Modes
@@ -352,20 +352,20 @@ Relay avoids indiscriminate context dumping by combining on-demand discovery, BM
 
 ```mermaid
 flowchart TD
-    subgraph Context Assembly
-        Discovery[Project Discovery: Manifests, Frameworks, AGENTS.md] --> BudgetManager[Token Budget Allocator]
-        Search[Code Search & Tree-sitter AST] --> Ranker[BM25 Lexical & Symbol Ranker]
+    subgraph ContextAssembly["Context Assembly"]
+        Discovery["Project Discovery: Manifests, Frameworks, AGENTS.md"] --> BudgetManager["Token Budget Allocator"]
+        Search["Code Search & Tree-sitter AST"] --> Ranker["BM25 Lexical & Symbol Ranker"]
         Ranker --> BudgetManager
-        BudgetManager --> FinalPrompt[Assembled System & User Context]
+        BudgetManager --> FinalPrompt["Assembled System & User Context"]
     end
 
-    subgraph Dynamic Compaction
-        FinalPrompt --> CheckPressure{Prompt > 85% Model Context Window?}
-        CheckPressure -- No --> PassToModel[Dispatch to Model Adapter]
-        CheckPressure -- Yes --> CompactorAgent[Autonomous Compactor Agent]
-        CompactorAgent --> Extract[Extract Goal, Decisions, File Diffs, State]
-        Extract --> SummaryBlock[Generate Structured ## Handoff Note]
-        SummaryBlock --> Truncate[Preserve System + Summary + Recent Tail]
+    subgraph DynamicCompaction["Dynamic Compaction"]
+        FinalPrompt --> CheckPressure{"Prompt > 85% Model Context Window?"}
+        CheckPressure -- "No" --> PassToModel["Dispatch to Model Adapter"]
+        CheckPressure -- "Yes" --> CompactorAgent["Autonomous Compactor Agent"]
+        CompactorAgent --> Extract["Extract Goal, Decisions, File Diffs, State"]
+        Extract --> SummaryBlock["Generate Structured Handoff Note"]
+        SummaryBlock --> Truncate["Preserve System + Summary + Recent Tail"]
         Truncate --> PassToModel
     end
 ```
