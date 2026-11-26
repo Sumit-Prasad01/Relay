@@ -1,13 +1,12 @@
 """Token estimation, budgeting, and capacity tracking (Section 10.3)."""
 
-import json
 from dataclasses import dataclass
 from typing import Any, List
 
 
 @dataclass
 class TokenBudget:
-    max_context_tokens: int = 64_000
+    max_context_tokens: int = 128_000
     reserved_output_tokens: int = 4_096
     reserved_headroom_tokens: int = 2_000
 
@@ -39,4 +38,6 @@ class TokenEstimator:
                     total += cls.estimate_text(fn.get("name", "")) + cls.estimate_text(fn.get("arguments", "")) + 8
             else:
                 total += cls.estimate_text(getattr(m, "content", "") or "") + 4
+                for tc in getattr(m, "tool_calls", None) or []:
+                    total += cls.estimate_text(getattr(tc, "name", "") or "") + cls.estimate_text(getattr(tc, "arguments", "") or "") + 8
         return total

@@ -1,9 +1,6 @@
 import os
-from pathlib import Path
-import pytest
 from Relay.config.loader import load_config
 from Relay.config.schemas import RootConfig
-from Relay.utils.errors import ConfigurationError
 
 
 def test_default_config(tmp_path):
@@ -17,6 +14,7 @@ def test_default_config(tmp_path):
     assert "ollama" in cfg.providers
     assert cfg.providers["groq"].model == "llama-3.3-70b-versatile"
     assert cfg.agent.max_iterations == 30
+    assert cfg.agent.max_context_tokens == 128000
     assert cfg.permission_mode == "ask"
 
 

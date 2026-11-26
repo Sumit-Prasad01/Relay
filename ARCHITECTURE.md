@@ -61,7 +61,7 @@ The codebase is organized into dedicated functional modules under `Relay/`:
 | Package / Module | Responsibility | Key Classes & Functions |
 | :--- | :--- | :--- |
 | **`Relay.agent`** | Custom autonomous agent runtime, streaming turn loop, message conversions, safety stops, and retry policies. | `AgentRuntime`, `AgentLoop`, `AgentState`, `StopConditions`, `RetryPolicy`, `ErrorClassifier` |
-| **`Relay.cli`** | Developer CLI commands, interactive onboarding wizard (provider dropdown, masked API key box, model box), live streaming Markdown & spinner animations, and slash commands (`/model`, `/diff`, etc.). | `app`, `commands.py`, `display.py`, `prompts.py`, `pulse_status` |
+| **`Relay.cli`** | Developer CLI commands, interactive onboarding wizard, dark theme UI, live Markdown & spinner animations, readable tool-call previews (`write_file`, diffs, commands), and slash commands (`/model`, `/diff`, etc.). | `app`, `commands.py`, `display.py`, `prompts.py`, `render_tool_call` |
 | **`Relay.config`** | Configuration schemas, TOML loading, OS keyring secret storage, environment variable overrides. | `load_config`, `RootConfig`, `SecretManager` |
 | **`Relay.context`** | Project discovery, AST parsing, BM25 symbol ranking, token budgeting, and transcript compaction. | `ProjectDiscovery`, `ContextBuilder`, `Compactor`, `IgnoreRules`, `CodeSearch` |
 | **`Relay.integrations`** | Extensibility mechanisms: custom markdown skill discovery and lifecycle hook event dispatchers. | `SkillLoader`, `HookDispatcher`, `LifecycleEvent` |
@@ -211,13 +211,16 @@ stateDiagram-v2
     CheckingStopConditions --> TurnCompleted: StopHalt
 
     state ExecutingTools {
-        [*] --> SecurityEvaluation
+        [*] --> RenderPreview
+        RenderPreview --> SecurityEvaluation: Parsed Strictly via parse_arguments_strict
         SecurityEvaluation --> UserApprovalGate: Policy Requires Approval
         SecurityEvaluation --> SandboxExecution: Policy Pre-approved
-        UserApprovalGate --> SandboxExecution: User Granted
-        UserApprovalGate --> RejectionOutput: User Denied
+        UserApprovalGate --> SandboxExecution: Allow
+        UserApprovalGate --> RejectionOutput: Don't Allow
+        UserApprovalGate --> GuidanceOutput: Tell agent explicitly
         SandboxExecution --> RecordResult: Tool Returns Output
-        RejectionOutput --> RecordResult: Return Rejection Error
+        RejectionOutput --> RecordResult: Return Denial Error
+        GuidanceOutput --> RecordResult: Inject User Guidance & Continue
     }
 
     ExecutingTools --> ModelGeneration: Tool Results Appended to Messages
@@ -227,20 +230,22 @@ stateDiagram-v2
 
 ### 4.1 Safety Stop Conditions & Resource Guards
 
-The runtime enforces deterministic guardrails configured via `StopConditions`:
-1. **Iteration Limit**: Caps execution at `max_iterations` (default: 30) to prevent infinite reasoning loops.
-2. **Tool Call Limit**: Restricts cumulative tool calls per user turn (default: 50).
-3. **Timeout Limit**: Wall-clock timeout (default: 300 seconds) terminating unresponsive operations.
-4. **Token Budget Limit**: Monitors prompt and completion tokens against user-configured spend ceilings.
-5. **Cancellation Signal**: `asyncio.Event` listener enabling immediate, safe abort upon user `Ctrl+C`.
+The runtime enforces deterministic guardrails configured via `StopConditionEvaluator`:
+1. **Iteration Limit**: Caps execution at `max_iterations` (default: `30`) to prevent infinite reasoning loops.
+2. **Tool Call Limit**: Restricts cumulative tool calls per user turn (`max_tool_calls`, default: `100`).
+3. **Timeout Limit**: Wall-clock timeout (`task_timeout_seconds`, default: `1800` seconds) terminating unresponsive operations.
+4. **Token Budget Limit**: Monitors prompt and completion tokens against `max_context_tokens` (default: **`128,000`** / 128k).
+5. **Repetitive Tool-Loop Breaker & Read Cache**: Deduplicates identical batch calls, caches unchanged read-only calls per turn, skips repeated failed/rejected calls, and halts cleanly (`repetitive_tool_loop`) after 2 consecutive all-duplicate iterations.
+6. **Cancellation Signal**: `asyncio.Event` / `KeyboardInterrupt` enabling safe cancellation (`state.is_cancelled`).
 
-### 4.2 Error Classification & Exponential Backoff
+### 4.2 Error Classification, Validation & Self-Correction
 
-The `ErrorClassifier` maps runtime exceptions into actionable recovery policies:
+The `ErrorClassifier` and `AgentLoop` handle runtime failures cleanly:
 - **Rate Limit (`429`) / Server Overload (`503`, `529`)**: Triggers `RetryPolicy` with exponential backoff and jitter (`base_delay=1.0s`, `backoff_factor=2.0`, `max_retries=3`).
-- **Context Length Exceeded**: Immediately activates the `Compactor` to condense message history.
-- **Tool Execution Errors**: Captured and returned to the model as `role="tool"` error messages, giving the agent opportunity to self-diagnose and correct parameters.
-- **Authentication Failure (`401`, `403`)**: Non-retryable; immediately surfaces clear instructions to re-enter credentials (`relay provider add <name>`).
+- **Provider Tool-Use Failures (`tool_use_failed`, `not in request.tools`)**: Triggers bounded self-correction (up to `3` attempts per turn), supplying exact JSON escaping hints and valid registered tool names back to the model instead of crashing.
+- **Malformed Local Tool JSON (`parse_arguments_strict`)**: Caught prior to dispatch, logged as `invalid_arguments`, and returned to the model without executing partial payloads.
+- **Context Length Exceeded**: Triggers `Compactor` / `ContextBuilder.fit_messages` trimming while preserving `assistant.tool_calls` ↔ `tool` message pairing.
+- **Authentication Failure (`401`, `403`)**: Non-retryable; immediately surfaces clear instructions to re-enter credentials (`relay provider add <name>` or `/model`).
 
 ---
 
@@ -304,9 +309,10 @@ flowchart TD
 
     ModeCheck -- "ask" --> AskGate{"Risk Classification"}
     AskGate -- "Read-Only" --> AllowExec
-    AskGate -- "Mutation / Network / Destructive / Unknown" --> PromptUser["Prompt User Approval (y/n)"]
-    PromptUser -- "User Approved" --> AllowExec
-    PromptUser -- "User Denied" --> BlockAsk["Return User Denial Error"]
+    AskGate -- "Mutation / Network / Destructive / Unknown" --> PromptUser["Approval Dropdown:<br/>Allow / Don't Allow / Tell agent explicitly"]
+    PromptUser -- "Allow" --> AllowExec
+    PromptUser -- "Don't Allow" --> BlockAsk["Return User Denial (user_denied)"]
+    PromptUser -- "Tell agent explicitly" --> InstructAgent["Capture Guidance Input Box &<br/>Redirect Agent (user_instructed)"]
 
     ModeCheck -- "auto-edit" --> AutoGate{"Is In-Workspace Edit?"}
     AutoGate -- "Yes" --> AllowExec
@@ -340,7 +346,7 @@ The `CommandPolicy` engine classifies shell commands using lexical parsing rathe
 
 | OS | Sandbox Isolation Mechanism | Default Boundaries |
 | :--- | :--- | :--- |
-| **Windows** | Isolated Subprocess + Process Trees + VirtualEnv PATH Injection | Restricted working directory, inheritance of virtualenv `Scripts`, termination of child process trees via `taskkill /F /T`. |
+| **Windows** | Git Bash / PowerShell + Process Trees + Workspace `.venv` Priority | Normalizes Windows backslash paths to forward slashes for Git Bash (`normalize_windows_paths_for_bash`), prioritizes workspace `.venv/Scripts`, kills child process trees via `taskkill /F /T`. |
 | **Linux** | Bubblewrap (`bwrap`) Namespaces | Unshared network namespace (`--unshare-net`), read-only root mounts, isolated `/tmp`, restricted writable workspace. |
 | **macOS** | Seatbelt Sandbox Profiles (`sandbox-exec`) | Fine-grained Seatbelt profiles blocking unrequested file writes and outbound network sockets. |
 
@@ -407,22 +413,25 @@ When compaction triggers, history is summarized into a standardized schema:
 
 ### 8.1 Built-in Tool Suite
 
-Relay includes 12 first-party engineering tools:
+Relay includes 15 first-party engineering tools registered in `create_default_registry()`:
 
-| Category | Tool Name | Description | Key Security Check |
+| Category | Tool Name | Description | Terminal Preview & Security Check |
 | :--- | :--- | :--- | :--- |
-| **Filesystem** | `read_file` | Reads file content with optional start/end line bounds. | Path must reside within workspace. |
-| | `write_file` | Writes full file content with automatic parent directory creation. | Path must reside within workspace; mode gate. |
-| | `edit_file` | Performs exact string replacements within a file. | Single or unique match verification. |
-| | `list_directory` | Lists directory entries with recursive depth filtering. | Path traversal blocked. |
-| **Patch** | `apply_patch` | Applies unified git-style diffs cleanly to local files. | Rejects out-of-workspace diff headers. |
-| **Search** | `search_code` | BM25 and regex search across codebase files. | Honors `.gitignore` and `.relayignore`. |
-| | `find_files` | Glob pattern search for file names across the repository. | Honors ignore rules. |
-| **Terminal** | `run_terminal_command` | Executes shell commands in the sandbox runner. | Evaluated by `CommandPolicy`. |
-| **Testing** | `run_tests` | Automatically discovers and runs project test suites. | Virtualenv discovery and exit-code reporting. |
-| | `get_diagnostics` | Inspects test failures, tracebacks, and lint warnings. | Read-only. |
-| **Git** | `git_status` | Returns active working tree status and branch info. | Read-only. |
-| | `git_diff` | Computes unified git diffs against HEAD or index. | Read-only. |
+| **Filesystem** | `list_files` | Lists files and directories honoring ignore rules. | Compact header; path traversal blocked. |
+| | `read_file` | Reads file content with optional `offset` and `limit` line bounds. | Compact header; path must reside within workspace. |
+| | `write_file` | Creates or overwrites files with pre-write snapshots. | Syntax-highlighted `WRITE FILE` preview; mode gate. |
+| **Patch** | `edit_file` | Performs exact string replacements (`allow_multi_edit` optional). | Unified diff `EDIT FILE` preview; unique match guard. |
+| | `apply_patch` | Atomically applies unified diff hunks and rejects line-number prefixes. | Unified diff `APPLY PATCH` preview; workspace & snapshot gate. |
+| **Search** | `search_code` | Ripgrep/fallback regex and `file_glob` search across codebase. | Compact header; honors `.gitignore` and `.relayignore`. |
+| **Terminal** | `run_command` | Executes shell commands inside `SandboxRunner`. | Highlighted `RUN COMMAND` panel; evaluated by `CommandPolicy`. |
+| **Testing** | `run_tests` | Auto-discovers or runs project test commands. | Highlighted `RUN TESTS` panel; workspace `.venv` prioritized. |
+| **Git** | `git_status` | Returns working tree status (`git status --short`). | Read-only header; bounded output. |
+| | `git_diff` | Computes unified git diffs against index/HEAD. | Read-only header; bounded output. |
+| | `git_log` | Shows recent commits (`--oneline`). | Read-only header. |
+| | `git_branch` | Creates or switches git branches. | Gated by `PermissionManager`. |
+| | `git_commit` | Commits staged/modified changes. | Gated by `PermissionManager`. |
+| **Diagnostics**| `diagnose_project` | Detects languages, manifests, test/lint commands, and `AGENTS.md`. | Read-only header. |
+| | `get_environment` | Reports OS, platform, Python version, and CPU architecture. | Read-only header. |
 
 ### 8.2 Model Context Protocol (MCP) Client Integration
 
@@ -557,19 +566,19 @@ sequenceDiagram
         Provider-->>Runtime: Stream ModelEvents (Text & Tool Calls)
         alt Emitted Text Delta
             Runtime-->>CLI: Buffer & render via Rich Live Markdown
-        else Emitted Tool Call (e.g. edit_file)
+        else Emitted Tool Call (e.g. write_file or edit_file)
+            Runtime-->>CLI: Emit tool_call_requested -> Render syntax-highlighted preview
             Runtime->>Perm: evaluate_tool(tool_call, mode="ask")
             alt Requires User Approval
-                Perm->>CLI: Request confirmation prompt
-                CLI->>User: "Proceed with this action? [y/N]"
-                User-->>CLI: "y"
-                CLI-->>Perm: Decision: Approved
+                Perm->>CLI: Open 3-choice dropdown (Allow / Don't Allow / Tell agent)
+                User-->>CLI: Choose Allow, Don't Allow, or Tell agent guidance
+                CLI-->>Perm: Return ApprovalResult
             end
-            Perm->>Tools: execute_tool(tool_name, args)
-            Tools->>Tools: Apply modification in Sandbox
-            Tools-->>Runtime: ToolResult(output="Replacement successful")
+            Perm->>Tools: Execute if Allow (else return user_denied or user_instructed)
+            Tools->>Tools: Execute inside Sandbox with workspace .venv priority
+            Tools-->>Runtime: Structured ToolResult
             Runtime->>DB: record_tool_call & record_file_change
-            Runtime->>Runtime: Append ToolResult to message history
+            Runtime->>Runtime: Append ToolResult to message history & continue loop
         else Finished (finish_reason="stop")
             Runtime->>CLI: Flush final rendered Markdown & summary
         end

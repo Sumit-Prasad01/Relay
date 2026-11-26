@@ -22,6 +22,11 @@ from Relay.cli.display import (
     print_doctor_report,
     print_session_card,
     pulse_status,
+    render_tool_call,
+    render_tool_denied,
+    render_tool_error,
+    render_tool_result,
+    set_active_status,
 )
 from Relay.cli.prompts import (
     RELAY_PROMPT_STYLE,
@@ -691,6 +696,7 @@ async def _run_turn_stream(runtime, state, prompt: str) -> None:
     active_status = None
     markdown_live: Optional[Live] = None
     text_chunks: list[str] = []
+    last_render_valid = True
 
     def _start_spinner(label: str) -> None:
         nonlocal active_status
@@ -698,11 +704,13 @@ async def _run_turn_stream(runtime, state, prompt: str) -> None:
             return
         _stop_spinner()
         active_status = console.status(f"[{MUTED}]{label}[/{MUTED}]", spinner="dots2", spinner_style=ACCENT)
+        set_active_status(active_status)
         active_status.start()
 
     def _stop_spinner() -> None:
         nonlocal active_status
         if active_status is not None:
+            set_active_status(None)
             active_status.stop()
             active_status = None
 
@@ -745,20 +753,43 @@ async def _run_turn_stream(runtime, state, prompt: str) -> None:
             elif event.event_type == "tool_call_requested" and event.tool_call:
                 _stop_spinner()
                 _flush_markdown()
-                console.print(
-                    f"\n[bold {ACCENT}]⚙ {event.tool_call.name}[/bold {ACCENT}] [{DIM}]{event.tool_call.arguments}[/{DIM}]"
-                )
+                last_render_valid = render_tool_call(event.tool_call, target_console=console)
+            elif event.event_type == "tool_call_started" and event.tool_call:
                 _start_spinner(f"Executing {event.tool_call.name}...")
             elif event.event_type == "tool_call_completed" and event.tool_result:
                 _stop_spinner()
-                duration = f" ({event.tool_result.duration_ms}ms)" if event.tool_result.duration_ms else ""
-                console.print(f"[{SUCCESS}]✓ Completed{duration}[/{SUCCESS}]")
-                if event.tool_result.content and len(event.tool_result.content) < 300:
-                    console.print(f"[{DIM}]{event.tool_result.content.strip()}[/{DIM}]")
+                tool_name = event.tool_call.name if event.tool_call else "tool"
+                render_tool_result(tool_name, event.tool_result, target_console=console)
                 _start_spinner("Thinking...")
             elif event.event_type == "tool_call_failed" and event.tool_result:
                 _stop_spinner()
-                console.print(f"[bold {ERROR}]✖ Failed:[/bold {ERROR}] {event.tool_result.content.strip()}")
+                tool_name = event.tool_call.name if event.tool_call else "tool"
+                err_code = event.tool_result.error or ""
+                if err_code == "user_instructed":
+                    render_tool_denied(
+                        tool_name,
+                        reason=event.tool_result.content,
+                        is_instruct=True,
+                        target_console=console,
+                    )
+                elif err_code == "user_denied":
+                    render_tool_denied(tool_name, is_policy=False, target_console=console)
+                elif err_code == "permission_denied":
+                    render_tool_denied(
+                        tool_name,
+                        reason=event.tool_result.content,
+                        is_policy=True,
+                        target_console=console,
+                    )
+                elif err_code == "invalid_arguments" and not last_render_valid:
+                    # Validation error already rendered cleanly on tool_call_requested
+                    pass
+                else:
+                    render_tool_error(
+                        tool_name,
+                        event.tool_result.content or event.error or "Execution failed",
+                        target_console=console,
+                    )
                 _start_spinner("Thinking...")
             elif event.event_type == "file_changed" and event.file_path:
                 _stop_spinner()
@@ -767,7 +798,7 @@ async def _run_turn_stream(runtime, state, prompt: str) -> None:
             elif event.event_type == "error":
                 _stop_spinner()
                 _flush_markdown()
-                console.print(f"\n[bold {ERROR}]Error:[/bold {ERROR}] {event.error}")
+                render_tool_error("runtime", str(event.error or "Unknown error"), target_console=console)
             elif event.event_type == "stop_condition_met":
                 _stop_spinner()
                 _flush_markdown()

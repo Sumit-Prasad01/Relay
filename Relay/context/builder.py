@@ -2,10 +2,10 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from Relay.context.instructions import InstructionLoader
-from Relay.context.project import ProjectDiscovery, ProjectInfo
+from Relay.context.project import ProjectDiscovery
 from Relay.context.tokenizer import TokenBudget, TokenEstimator
 from Relay.providers.base import ModelMessage
 
@@ -32,9 +32,16 @@ class ContextBuilder:
         info = self.discovery.discover()
         env_lines = [
             "<environment>",
-            f"workspace: {self.workspace_root}",
+            f"workspace: {self.workspace_root.as_posix()}",
+            "shell: bash (use forward slashes '/' for all file paths, even on Windows; commands already run inside workspace root)",
             f"time: {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}",
         ]
+        for venv_name in (".venv", "venv"):
+            if (self.workspace_root / venv_name).is_dir():
+                env_lines.append(
+                    f"virtualenv: {venv_name} (prioritized on PATH; invoke python directly or via {venv_name}/Scripts/python.exe on Windows / {venv_name}/bin/python on POSIX)"
+                )
+                break
         if info.git_branch:
             env_lines.append(f"git_branch: {info.git_branch}")
         if info.languages:
@@ -65,11 +72,16 @@ class ContextBuilder:
         tokens_spent = 0
 
         for m in reversed(messages):
-            cost = TokenEstimator.estimate_text(m.content) + 4
+            cost = TokenEstimator.estimate_messages([m])
             if tokens_spent + cost > available and accumulated:
                 break
             accumulated.append(m)
             tokens_spent += cost
 
-        fit.extend(reversed(accumulated))
+        trimmed = list(reversed(accumulated))
+        # Never start trimmed history with an orphaned tool result whose assistant call was cut off
+        while trimmed and trimmed[0].role == "tool":
+            trimmed.pop(0)
+
+        fit.extend(trimmed)
         return fit

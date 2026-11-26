@@ -12,7 +12,7 @@ class AgentConfig(BaseModel):
     max_tool_calls: int = Field(default=100, ge=1, le=1000)
     task_timeout_seconds: int = Field(default=1800, ge=10)
     max_parallel_tools: int = Field(default=4, ge=1, le=16)
-    max_context_tokens: int = Field(default=64000, ge=1000)
+    max_context_tokens: int = Field(default=128000, ge=1000)
     stream: bool = True
 
 

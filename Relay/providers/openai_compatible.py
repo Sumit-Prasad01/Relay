@@ -204,7 +204,7 @@ class OpenAICompatibleProvider(BaseProvider):
 
                 if delta.tool_calls:
                     for tc_delta in delta.tool_calls:
-                        idx = tc_delta.index
+                        idx = tc_delta.index if tc_delta.index is not None else 0
                         if idx not in accumulated_tools:
                             accumulated_tools[idx] = {
                                 "id": tc_delta.id or "",
@@ -212,10 +212,10 @@ class OpenAICompatibleProvider(BaseProvider):
                                 "arguments": "",
                             }
                         else:
-                            if tc_delta.id:
-                                accumulated_tools[idx]["id"] += tc_delta.id
-                            if tc_delta.function and tc_delta.function.name:
-                                accumulated_tools[idx]["name"] += tc_delta.function.name
+                            if tc_delta.id and not accumulated_tools[idx]["id"]:
+                                accumulated_tools[idx]["id"] = tc_delta.id
+                            if tc_delta.function and tc_delta.function.name and not accumulated_tools[idx]["name"]:
+                                accumulated_tools[idx]["name"] = tc_delta.function.name
 
                         if tc_delta.function and tc_delta.function.arguments:
                             accumulated_tools[idx]["arguments"] += tc_delta.function.arguments

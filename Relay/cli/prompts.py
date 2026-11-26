@@ -30,7 +30,7 @@ RELAY_PROMPT_STYLE = Style.from_dict(
         "selected-option": "bold #38bdf8 bg:#0f172a",
         "option": "#cbd5e1",
         "number": "#64748b",
-        "input-selection": "reverse",
+        "input-selection": "",
         "placeholder": "#64748b italic",
         "bottom-toolbar": "bg:#0f172a #94a3b8",
         "bottom-toolbar.text": "#94a3b8",

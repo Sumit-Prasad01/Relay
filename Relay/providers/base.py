@@ -22,6 +22,18 @@ class ToolCall(BaseModel):
         except Exception:
             return {}
 
+    def parse_arguments_strict(self) -> Dict[str, Any]:
+        """Parse JSON tool-call arguments strictly, raising ValueError on malformed or non-object input."""
+        if not isinstance(self.arguments, str) or not self.arguments.strip():
+            raise ValueError("Tool call arguments are empty or not a JSON string.")
+        try:
+            parsed = json.loads(self.arguments)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Malformed JSON arguments: {e.msg} (line {e.lineno}, col {e.colno})") from e
+        if not isinstance(parsed, dict):
+            raise ValueError(f"Expected JSON object for tool arguments, got {type(parsed).__name__}.")
+        return parsed
+
 
 class ToolDefinition(BaseModel):
     name: str

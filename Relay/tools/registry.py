@@ -1,8 +1,6 @@
 """Tool registry and dispatcher with permission gates and audit logging (Section 7.5 & 8)."""
 
-import json
 import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from Relay.providers.base import ToolDefinition
@@ -65,8 +63,26 @@ class ToolRegistry:
                 )
             if action == PermissionAction.ASK:
                 target = arguments.get("command") or arguments.get("path")
-                approved = ApprovalHandler.request_approval(reason or f"Approve {name}", target)
+                decision = ApprovalHandler.request_approval(reason or f"Approve {name}", target)
+                if isinstance(decision, bool):
+                    approved = decision
+                    decision_action = "allow" if approved else "deny"
+                    instruction = None
+                else:
+                    approved = decision.approved
+                    decision_action = decision.action
+                    instruction = decision.instruction
+
                 if not approved:
+                    if decision_action == "instruct" and instruction:
+                        return ToolResult(
+                            content=(
+                                f"User declined '{name}' and gave explicit instructions to follow instead: "
+                                f"{instruction}"
+                            ),
+                            success=False,
+                            error="user_instructed",
+                        )
                     return ToolResult(
                         content="User rejected this tool execution.",
                         success=False,

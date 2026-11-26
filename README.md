@@ -10,10 +10,11 @@ Relay understands existing codebases, plans and executes engineering tasks, runs
 
 - **Provider-Agnostic & BYOK:** Supports **OpenRouter**, **Groq**, **Anthropic Claude**, **OpenAI**, **Google Gemini**, and local **Ollama** models behind a single normalized interface.
 - **Interactive Onboarding & Dark Terminal UI:** Launching `relay` opens an animated dark interface with a provider selection dropdown, masked OS-keyring API key prompt, model input box, live thinking/tool spinners, and real-time Markdown streaming.
+- **Readable Tool Previews & Approval Dropdown:** Inspect syntax-highlighted `write_file` code panels, unified diffs for `edit_file` / `apply_patch`, and `run_command` previews before execution. Approve via an interactive dropdown (`Allow`, `Don't Allow`, or `Tell agent explicitly` to guide Relay and continue the chat).
 - **Mid-Session Model Switching (`/model`):** Switch providers, API keys, or models seamlessly mid-conversation with automatic SQLite session updates.
 - **Local-First & Private:** Source files, command execution, SQLite history, and OS keyring credentials remain strictly on your local machine.
 - **Robust Security & Permissions:** 4 permission modes (`plan`, `ask`, `auto-edit`, `full-auto`), path-traversal protection, lexical command risk classification, and pre-write snapshots with unified diffs.
-- **Autonomous Agent Runtime & Workflows:** Streaming turn loop with token budgeting, transcript compaction, retries with exponential backoff, and LangGraph plan/review/repair workflows.
+- **Resilient Runtime & Workspace Awareness:** Automatic workspace `.venv`/`venv` priority and Windows path normalization in Git Bash, duplicate tool-call protection, provider JSON error self-correction, and a **128k (`128,000`)** default session token budget.
 - **Extensible:** Model Context Protocol (MCP) stdio client, `.agents/skills` discovery, and configurable lifecycle hooks.
 
 ---
@@ -112,11 +113,13 @@ Relay resolves configuration in strict precedence order:
 4. Global user config (`~/.config/relay/config.toml`)
 5. Application defaults
 
-### Permission Modes
+### Permission Modes & Interactive Approvals
 - **`plan`**: Read-only exploration. No file writes or state-changing commands permitted.
-- **`ask`** (Default): Read operations run automatically; file writes and shell commands prompt for approval.
+- **`ask`** (Default): Read operations run automatically; file writes and shell commands show a preview and open a 3-choice dropdown (**Allow**, **Don't Allow**, or **Tell agent explicitly**).
 - **`auto-edit`**: In-workspace file edits are allowed automatically; terminal commands and out-of-workspace access prompt for approval.
 - **`full-auto`**: Opt-in autonomous workflow mode scoped to the workspace; destructive commands remain gated.
+
+Default session token budget is `128,000` (`[agent].max_context_tokens` in config).
 
 ---
 
