@@ -1,11 +1,13 @@
 """Dark, sleek terminal UI utilities, animations, and tool-call renderers using Rich."""
 
+from __future__ import annotations
+
 import difflib
 import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
 
 from rich import box
 from rich.align import Align
@@ -20,7 +22,9 @@ from rich.theme import Theme
 
 from Relay import __version__
 from Relay.providers.base import ToolCall
-from Relay.tools.base import ToolResult
+
+if TYPE_CHECKING:
+    from Relay.tools.base import ToolResult
 
 # Cohesive dark obsidian & sky-cyan palette
 ACCENT = "#38bdf8"       # Crisp sky cyan
@@ -624,3 +628,41 @@ def render_tool_call(
 
     render_generic_tool_call(name, arguments, target_console=out)
     return True
+
+
+def extract_complete_markdown_blocks(buffer: str) -> Tuple[List[str], str]:
+    """Split completed top-level Markdown blocks separated by blank lines outside code fences.
+
+    Used during streaming so each paragraph, heading, table, or code block prints once
+    without relying on multi-line Live cursor-up redraws that duplicate on Windows terminals.
+    """
+    if not buffer:
+        return [], ""
+
+    ready: List[str] = []
+    cur_lines: List[str] = []
+    open_fence: Optional[str] = None
+
+    for line in buffer.splitlines(keepends=True):
+        stripped = line.lstrip()
+        fence_token = None
+        if stripped.startswith("```"):
+            fence_token = "```"
+        elif stripped.startswith("~~~"):
+            fence_token = "~~~"
+
+        if fence_token:
+            if open_fence is None:
+                open_fence = fence_token
+            elif fence_token == open_fence and stripped.strip() == fence_token:
+                open_fence = None
+
+        if open_fence is None and line.strip() == "" and line.endswith("\n"):
+            if any(l.strip() for l in cur_lines):
+                ready.append("".join(cur_lines).strip())
+                cur_lines = []
+            continue
+
+        cur_lines.append(line)
+
+    return ready, "".join(cur_lines)

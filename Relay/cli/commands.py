@@ -18,6 +18,7 @@ from Relay.cli.display import (
     SUCCESS,
     WARNING,
     console,
+    extract_complete_markdown_blocks,
     print_banner,
     print_doctor_report,
     print_session_card,
@@ -679,10 +680,9 @@ def interactive_session(
 
 
 async def _run_turn_stream(runtime, state, prompt: str) -> None:
-    """Stream agent execution turn events to terminal with live status and Markdown rendering."""
+    """Stream agent execution turn events to terminal with live status and non-repeating Markdown blocks."""
     import sys
     from rich import box
-    from rich.live import Live
     from rich.markdown import Markdown
     from rich.panel import Panel
     from rich.syntax import Syntax
@@ -694,62 +694,56 @@ async def _run_turn_stream(runtime, state, prompt: str) -> None:
 
     is_tty = bool(sys.stdout and sys.stdout.isatty())
     active_status = None
-    markdown_live: Optional[Live] = None
-    text_chunks: list[str] = []
+    active_label = ""
+    md_buffer = ""
     last_render_valid = True
 
     def _start_spinner(label: str) -> None:
-        nonlocal active_status
+        nonlocal active_status, active_label
         if not is_tty:
             return
+        if active_status is not None and active_label == label:
+            return
         _stop_spinner()
+        active_label = label
         active_status = console.status(f"[{MUTED}]{label}[/{MUTED}]", spinner="dots2", spinner_style=ACCENT)
         set_active_status(active_status)
         active_status.start()
 
     def _stop_spinner() -> None:
-        nonlocal active_status
+        nonlocal active_status, active_label
         if active_status is not None:
             set_active_status(None)
             active_status.stop()
             active_status = None
+            active_label = ""
 
-    def _update_markdown() -> None:
-        nonlocal markdown_live
-        rendered = Markdown("".join(text_chunks), code_theme="monokai", inline_code_theme="monokai")
-        if is_tty:
-            if markdown_live is None:
-                markdown_live = Live(
-                    rendered,
-                    console=console,
-                    refresh_per_second=12,
-                    vertical_overflow="visible",
-                )
-                markdown_live.start()
-            else:
-                markdown_live.update(rendered)
+    def _emit_markdown_chunk(delta: str) -> None:
+        nonlocal md_buffer
+        md_buffer += delta
+        completed, md_buffer = extract_complete_markdown_blocks(md_buffer)
+        if completed:
+            _stop_spinner()
+            for block in completed:
+                console.print(Markdown(block, code_theme="monokai", inline_code_theme="monokai"))
+            if md_buffer.strip():
+                _start_spinner("Streaming response...")
+        elif md_buffer.strip():
+            _start_spinner("Streaming response...")
 
     def _flush_markdown() -> None:
-        nonlocal markdown_live
-        if not text_chunks:
+        nonlocal md_buffer
+        if not md_buffer.strip():
+            md_buffer = ""
             return
-        full_text = "".join(text_chunks)
-        rendered = Markdown(full_text, code_theme="monokai", inline_code_theme="monokai")
-        if markdown_live is not None:
-            markdown_live.update(rendered, refresh=True)
-            markdown_live.stop()
-            markdown_live = None
-        else:
-            console.print(rendered)
-        text_chunks.clear()
+        console.print(Markdown(md_buffer.strip(), code_theme="monokai", inline_code_theme="monokai"))
+        md_buffer = ""
 
     _start_spinner("Thinking...")
     try:
         async for event in runtime.run_turn(state, prompt):
             if event.event_type == "text_delta" and event.text_delta:
-                _stop_spinner()
-                text_chunks.append(event.text_delta)
-                _update_markdown()
+                _emit_markdown_chunk(event.text_delta)
             elif event.event_type == "tool_call_requested" and event.tool_call:
                 _stop_spinner()
                 _flush_markdown()

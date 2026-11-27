@@ -187,6 +187,26 @@ def test_configure_logging_suppresses_httpx_info_by_default():
     configure_logging(debug=False)
 
 
+def test_extract_complete_markdown_blocks_preserves_fences_and_avoids_duplication():
+    from Relay.cli.display import extract_complete_markdown_blocks
+
+    # Paragraph break outside code fence flushes completed blocks once
+    buf = "## Codebase Overview\n\nThis is a small project.\n\n## Structure\n\n```\nTest-Relay/\n\n  users.csv\n"
+    ready, rem = extract_complete_markdown_blocks(buf)
+    assert ready == [
+        "## Codebase Overview",
+        "This is a small project.",
+        "## Structure",
+    ]
+    # Unclosed code fence (even containing blank line) stays buffered in remainder
+    assert rem.startswith("```\nTest-Relay/")
+
+    # Once closing fence + blank line arrive, whole code block flushes cleanly
+    ready2, rem2 = extract_complete_markdown_blocks(rem + "```\n\nNext para")
+    assert ready2 == ["```\nTest-Relay/\n\n  users.csv\n```"]
+    assert rem2 == "Next para"
+
+
 def test_run_turn_stream_renders_markdown(tmp_path):
     import asyncio
     from types import SimpleNamespace
